@@ -83,7 +83,9 @@ mcp-server.mjs        MCP 服务器（stdio JSON-RPC）
 wb-bridge.mjs         命令行桥：读消息 / 写回 / 队列
 lib/                  存储、微信读取、模型后端、队列
 public/               前端页面
+public/announcements.json  应用内公告内容
 data/                 本机数据（已 gitignore）
+desktop/              Electron 桌面壳（可选，独立窗口 + 桌面图标）
 vendor/wechat-decrypt Windows 微信解密脚本
 INSTALL_FOR_AI.md     Windows 安装手册
 version.json          版本与更新信息
@@ -100,6 +102,33 @@ git pull --ff-only
 ```
 
 `data/` 不会被覆盖。
+
+### 应用内公告
+
+顶栏 📢 里的内容来自 `public/announcements.json`，改完刷新页面即可生效，不用重启服务。
+
+发版时加一条更新公告：
+
+1. 把 `version.json` 的 `version` 改成新版本号。
+2. 在 `announcements.json` 的 `items` 数组**开头**插入一条，`version` 填新版本号。
+
+```json
+{
+  "id": "release-1.2.0",
+  "version": "1.2.0",
+  "date": "2026-12-01",
+  "tag": "更新",
+  "title": "v1.2.0 更新内容",
+  "blocks": [
+    { "t": "h", "text": "新增" },
+    { "t": "list", "items": ["**桌面版**：独立窗口。"] }
+  ]
+}
+```
+
+客户端会记录「已读到的最高版本」：用户没看过的公告会在顶栏显示红点，并在打开页面时自动展开一次。
+`blocks` 支持的块类型：`p`（段落）、`h`（小标题）、`steps`（有序步骤）、`list`（无序列表）、`code`（代码块）。
+行内可用 `**加粗**` 和 `` `代码` ``。
 
 ## 开发
 

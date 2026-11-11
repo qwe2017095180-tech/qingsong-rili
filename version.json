@@ -1,7 +1,7 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "releasedAt": "2026-11-11",
-  "notes": "首个开源版本：微信群通知整理、待办与归档、手动添加待办、娱乐群小结、MCP 工具、Windows 安装包。",
+  "notes": "新增桌面版与应用内公告；群列表改为按最近活跃排序、只显示群聊与好友；修复群名含 emoji 时群列表读取失败。",
   "repo": "qwe2017095180-tech/qingsong-rili",
   "download": "https://github.com/qwe2017095180-tech/qingsong-rili"
 }

@@ -1044,7 +1044,8 @@ $('drawer').addEventListener('click', (e) => {
 });
 
 $('mask').onclick = () => {
-  if (!$('settingsDrawer').hidden) closeSettings();
+  if (!$('annDrawer').hidden) closeAnnouncements();
+  else if (!$('settingsDrawer').hidden) closeSettings();
   else closeDetail();
 };
 
@@ -1063,6 +1064,12 @@ $('runBtn').onclick = async () => {
 };
 
 $('settingsBtn').onclick = openSettings;
+$('annBtn').onclick = () => {
+  if ($('annDrawer').hidden) openAnnouncements();
+  else closeAnnouncements();
+};
+$('closeAnn').onclick = closeAnnouncements;
+$('annOk').onclick = closeAnnouncements;
 $('closeSettings').onclick = closeSettings;
 $('clearArchiveBtn').onclick = clearArchive;
 $('emptyAction').onclick = () => {
@@ -1078,11 +1085,127 @@ $('emptyAction').onclick = () => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    if (!$('settingsDrawer').hidden) closeSettings();
+    if (!$('annDrawer').hidden) closeAnnouncements();
+    else if (!$('settingsDrawer').hidden) closeSettings();
     else if (!$('drawer').hidden) closeDetail();
   }
 });
 
+// ── 使用公告 ──────────────────────────────────────────────
+const ANN_SEEN_KEY = 'qs_ann_seen';
+
+function cmpVersion(a, b) {
+  const pa = String(a || '0').split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b || '0').split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+    const x = pa[i] || 0;
+    const y = pb[i] || 0;
+    if (x !== y) return x - y;
+  }
+  return 0;
+}
+
+// 行内格式：**加粗**、`代码`
+function fmtInline(text) {
+  return esc(text)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
+}
+
+function renderBlock(b) {
+  switch (b && b.t) {
+    case 'h':
+      return `<div class="ann-h">${fmtInline(b.text)}</div>`;
+    case 'steps':
+      return `<ol class="ann-steps">${(b.items || []).map((x) => `<li>${fmtInline(x)}</li>`).join('')}</ol>`;
+    case 'list':
+      return `<ul class="ann-list">${(b.items || []).map((x) => `<li>${fmtInline(x)}</li>`).join('')}</ul>`;
+    case 'code':
+      return `<pre class="ann-code">${esc(b.text)}</pre>`;
+    default:
+      return `<p class="ann-p">${fmtInline(b.text || '')}</p>`;
+  }
+}
+
+function annSeen() {
+  return localStorage.getItem(ANN_SEEN_KEY) || '0.0.0';
+}
+
+function annLatest() {
+  return (app.announcements || []).reduce((m, a) => (cmpVersion(a.version, m) > 0 ? a.version : m), '0.0.0');
+}
+
+function annHasUnseen() {
+  const seen = annSeen();
+  return (app.announcements || []).some((a) => cmpVersion(a.version, seen) > 0);
+}
+
+function updateAnnDot() {
+  const dot = $('annDot');
+  if (dot) dot.hidden = !annHasUnseen();
+}
+
+function renderAnnouncements() {
+  const body = $('annBody');
+  if (!body) return;
+  const items = app.announcements || [];
+  if (!items.length) {
+    body.innerHTML = '<div class="grp-empty">暂时没有公告</div>';
+    return;
+  }
+  const seen = annSeen();
+  body.innerHTML = items
+    .map((a) => {
+      const isNew = cmpVersion(a.version, seen) > 0;
+      return `<article class="ann-item">
+        <div class="ann-head">
+          <span class="ann-tag ${a.tag === '更新' ? 'upd' : 'guide'}">${esc(a.tag || '公告')}</span>
+          <span class="ann-title">${esc(a.title || '')}</span>
+          ${isNew ? '<span class="ann-new">新</span>' : ''}
+        </div>
+        <div class="ann-meta">v${esc(a.version || '')} · ${esc(a.date || '')}</div>
+        <div class="ann-content">${(a.blocks || []).map(renderBlock).join('')}</div>
+      </article>`;
+    })
+    .join('');
+}
+
+function openAnnouncements() {
+  $('mask').hidden = false;
+  $('annDrawer').hidden = false;
+  renderAnnouncements();
+  // 看过了就记下来，角标随之消失
+  localStorage.setItem(ANN_SEEN_KEY, annLatest());
+  updateAnnDot();
+}
+
+function closeAnnouncements() {
+  $('annDrawer').hidden = true;
+  if ($('drawer').hidden && $('settingsDrawer').hidden) $('mask').hidden = true;
+}
+
+async function loadAnnouncements() {
+  try {
+    const res = await fetch('/announcements.json', { cache: 'no-store' });
+    if (!res.ok) throw new Error(res.status);
+    const data = await res.json();
+    app.announcements = Array.isArray(data.items) ? data.items : [];
+  } catch {
+    app.announcements = [];
+  }
+  updateAnnDot();
+  renderAnnouncements();
+
+  // 有新内容时自动展开一次；每次页面加载只自动弹一次，避免反复打扰
+  if (annHasUnseen() && !sessionStorage.getItem('qs_ann_auto')) {
+    sessionStorage.setItem('qs_ann_auto', '1');
+    setTimeout(() => {
+      if ($('annDrawer').hidden && $('settingsDrawer').hidden && $('drawer').hidden) openAnnouncements();
+    }, 1200);
+  }
+}
+
 // ── 启动 ──────────────────────────────────────────────────
 load();
+loadAnnouncements();
 app.tickTimer = setInterval(updateCountdowns, 20000);

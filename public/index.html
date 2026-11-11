@@ -26,6 +26,7 @@
     <div class="next-run" id="nextRun">—</div>
     <button class="btn primary" id="runBtn"><span class="spark">✦</span> 立即整理</button>
     <button class="btn ghost" id="addBtn" title="手动添加待办">＋ 手动添加</button>
+    <button class="btn ghost" id="annBtn" title="使用公告">📢<span class="dot" id="annDot" hidden></span></button>
     <button class="btn ghost" id="settingsBtn" title="设置">⚙️</button>
   </div>
 </header>
@@ -96,6 +97,17 @@
   <div class="s-foot-fixed">
     <button class="btn primary" id="submitAdd" style="flex:1">交给 WorkBuddy 整理</button>
     <button class="btn ghost" id="cancelAdd">取消</button>
+  </div>
+</aside>
+
+<aside class="drawer settings" id="annDrawer" hidden>
+  <div class="drawer-head">
+    <h2>使用公告</h2>
+    <button class="close" id="closeAnn">×</button>
+  </div>
+  <div class="drawer-body" id="annBody"></div>
+  <div class="s-foot-fixed">
+    <button class="btn primary" id="annOk" style="flex:1">知道了</button>
   </div>
 </aside>
 
