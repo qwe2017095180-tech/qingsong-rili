@@ -1,0 +1,16 @@
+{
+  "name": "qingsong-rili-desktop",
+  "productName": "轻松日程",
+  "version": "1.0.0",
+  "description": "轻松日程桌面版：把微信群通知整理成带截止时间的卡片",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "icon": "python build/make_icon.py"
+  },
+  "devDependencies": {
+    "electron": "^45.3.0",
+    "windows-shortcuts": "^0.1.6"
+  }
+}

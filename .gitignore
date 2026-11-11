@@ -14,12 +14,17 @@ vendor/wechat-decrypt/__pycache__/
 # 打包产物与本机工具
 dist/
 build/
+# 例外：桌面壳的图标与生成脚本属于源码，需要入库
+!desktop/build/
+!desktop/build/**
 *.zip
 shots/
 .workbuddy-ai/
 
 # 含本机绝对路径的对接记录，不入库
 对接指南-WorkBuddy.md
+# 本机同步脚本（写死了本机微信数据目录）
+sync-wechat.bat
 
 # 系统与依赖
 .DS_Store
