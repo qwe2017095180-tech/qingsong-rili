@@ -27,20 +27,12 @@ PY="$SKILL_DIR/.venv/bin/python"
 "$PY" "$SKILL_DIR/scripts/common/doctor.py" --json
 ```
 
-## 本机已确认状态（2026-11-05 实测）
+## 环境要求
 
-| 项 | 状态 |
-|---|---|
-| sqlcipher | ✅ `/Users/jvok8721/.local/bin/sqlcipher` |
-| 微信数据 | ✅ 2 个账号 `db_storage` 已找到 |
-| zstandard / frida | ✅ 已装进 `.venv` |
-| 密钥 | ✅ **已就绪**（`per_db_keys.json`，19/21 库） |
-| `key.txt` | ⚠️ 占位文件（64 个 0），**真实密钥在 `per_db_keys.json`** |
-| 微信 App | 官网版 4.2.0，**已 ad-hoc 重签名**（旧版备份在 `/Applications/WeChat.app.appstore-bak`） |
-| MCP / Codex 链接 | 不需要，DSH 走 CLI |
-
-> 实测（2026-11-05）：`list` / `recent` 正常，能读到群名、消息正文、时间、方向。
-> `sqlcipher` 用的是 `~/.local/bin/sqlcipher` 替身（system python3.9 + sqlcipher3），已补 `.headers` / `.mode` / `-readonly` 兼容。
+- **macOS**：系统 `sqlcipher`（或通过 `WECHAT_SQLCIPHER_PATH` 指定），Python 3.9+
+- **Windows**：Python 3.9+，安装 `requirements-windows.txt`，微信 4.x（`Weixin.exe`）
+- 首次使用需要先提取数据库密钥；Windows 用 `scripts/windows/extract_raw_key.py` + `decrypt_all.py`
+- 密钥文件（`key*.txt`、`per_db_keys.json`）和解密产物（`decrypted/`）不要提交到仓库
 
 `doctor.py` 报 `skill` / `mcp` / `dependency:mcp` 的 warn 可以忽略——那是给 Codex 准备的。
 
