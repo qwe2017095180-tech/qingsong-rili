@@ -692,16 +692,25 @@ function closeSettings() {
 }
 
 async function loadGroups() {
-  if (app.groupCache) return renderSettings();
+  if (app.groupCache && app.groupCache.length) return renderSettings();
   $('settingsBody').querySelector('#grpList')?.classList.add('loading');
+  app.groupError = null;
   try {
     const res = await api('/api/groups', { method: 'POST' });
-    app.groupCache = res.chats || [];
-    if (!Array.isArray(app.groupCache)) app.groupCache = [];
-  } catch {
+    app.groupCache = Array.isArray(res.chats) ? res.chats : [];
+    if (res.ok === false) app.groupError = res.error || '读取失败';
+  } catch (err) {
     app.groupCache = [];
+    app.groupError = String((err && err.message) || err || '读取失败').slice(0, 200);
   }
   renderSettings();
+}
+
+// 供设置面板里的「重试」按钮调用
+function retryGroups() {
+  app.groupCache = null;
+  app.groupError = null;
+  loadGroups();
 }
 
 function renderSettings() {
@@ -735,7 +744,9 @@ function renderSettings() {
       <input class="s-input grp-search" id="grpSearch" placeholder="搜索群名…" value="${esc(app.groupQuery)}" />
       <div class="grp-list" id="grpList">
         ${groups.length === 0
-          ? `<div class="grp-empty">正在读取微信群列表…</div>`
+          ? `<div class="grp-empty">${app.groupError
+              ? `读取失败：${esc(app.groupError)}<br/><button class="btn ghost" onclick="retryGroups()" style="margin-top:10px;padding:6px 14px">重试</button>`
+              : '正在读取微信群列表…'}</div>`
           : filtered.length === 0
             ? `<div class="grp-empty">没有匹配的群</div>`
             : filtered.map((g) => `<label class="grp-row">
@@ -753,7 +764,7 @@ function renderSettings() {
       <input class="s-input grp-search" id="funSearch" placeholder="搜索娱乐群…" />
       <div class="grp-list" id="funList">
         ${groups.length === 0
-          ? `<div class="grp-empty">正在读取微信群列表…</div>`
+          ? `<div class="grp-empty">${app.groupError ? `读取失败：${esc(app.groupError)}` : '正在读取微信群列表…'}</div>`
           : (() => {
               const fq = (app.funQuery || '').toLowerCase();
               const fh = new Map(d.funGroups.map((g) => [g.wxid, g]));
