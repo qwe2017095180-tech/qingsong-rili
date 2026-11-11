@@ -110,9 +110,9 @@ node wb-bridge.mjs pending
 2. 设置自动整理时间（默认 20:00）和「往回看多久」（默认 24 小时）。
 3. 填「学期开始日期」（第一周周一，例如 `2026-09-14`），用于把「第 N 周」换算成日期。
 4. 选「谁来整理」：
-   - **自动**：有 WorkBuddy 命令行就用它，否则用 DeepSeek（需填 Key）。
+   - **自动**：有 WorkBuddy 命令行就用它，否则用 AI 接口（需填 Base URL、Key、模型名）。
    - **WorkBuddy 命令行**：需要本机装了 WorkBuddy 并完成一次 `/login`。
-   - **DeepSeek API**：在下面填 DeepSeek API Key（只存本机 `data/settings.json`），会产生接口费用。
+   - **AI 接口（OpenAI 兼容）**：填 Base URL、API Key、模型名（DeepSeek / OpenAI / Moonshot / 硅基流动等），只存本机 `data/settings.json`，会产生接口费用。
    - **只写请求，交给外部 AI**：应用不调模型，整理请求写进队列，由外部 AI 用 `wb-bridge.mjs` 接手。
 5. 保存设置。
 
@@ -121,7 +121,7 @@ node wb-bridge.mjs pending
 | 后端 | 适用情况 | 点「立即整理」的效果 |
 |---|---|---|
 | WorkBuddy 命令行 | 本机装了 WorkBuddy | 当场调模型，约 20–60 秒出卡片 |
-| DeepSeek API | 没装 WorkBuddy，但有 API Key | 当场调 DeepSeek，约 10–30 秒出卡片 |
+| AI 接口（OpenAI 兼容） | 没装 WorkBuddy，但有 API Key | 当场调模型，约 10–30 秒出卡片 |
 | 只写请求（队列） | 都不想配 | 只记一个请求，外部 AI 用 `wb-bridge.mjs` 处理 |
 
 队列模式的用法（给外部 AI）：
@@ -174,7 +174,7 @@ node wb-bridge.mjs complete <请求id> '{"items":3,"added":2,"updated":1}'
 - `vendor\wechat-decrypt\decrypted\` 是聊天记录明文，同样不要外传；不用时可以整个删掉，需要时重新解密。
 - `data\notices.json`、`data\fun.json` 是整理后的摘要，也属于个人数据。
 - 应用只读微信数据库，不写、不发消息、不访问微信服务器；封号风险可忽略。
-- 如果填了 DeepSeek API Key，它只保存在本机 `data\settings.json`，用于调用 `api.deepseek.com`。
+- 如果填了 AI 接口的 Key，它只保存在本机 `data\settings.json`，只用于调用你填的 Base URL。
 
 ## 13. 日常使用
 

@@ -779,13 +779,14 @@ function renderSettings() {
       <div class="s-title">🤖 谁来整理</div>
       <div class="s-desc">点「立即整理」或到点自动整理时，应用会直接调用模型当场完成分类、总结和截止判断，结果立刻写回。没有本地规则兜底，也不调用 codex / ds。</div>
       <select class="s-select" id="organizeBackend" style="width:100%;margin-top:8px">
-        ${[['auto','自动（优先 WorkBuddy，其次 DeepSeek）'],['workbuddy','WorkBuddy 命令行'],['deepseek','DeepSeek API'],['queue','只写请求，交给外部 AI 接手']]
+        ${[['auto','自动（优先 WorkBuddy，其次 AI 接口）'],['workbuddy','WorkBuddy 命令行'],['openai','AI 接口（OpenAI 兼容）'],['queue','只写请求，交给外部 AI 接手']]
           .map(([v,label]) => `<option value="${v}" ${String(app.data.settings.organizeBackend||'auto') === v ? 'selected' : ''}>${label}</option>`).join('')}
       </select>
-      <div class="s-desc" style="margin-top:8px">当前后端：<strong>${esc(app.data.env?.backend || '未知')}</strong>${app.data.env?.workbuddyCli ? ' · 已找到 WorkBuddy 命令行' : ''}${app.data.env?.deepseekConfigured ? ' · 已配置 DeepSeek Key' : ''}</div>
-      <input class="s-input" id="deepseekKey" type="password" placeholder="DeepSeek API Key（只存本机，留空则不启用）" value="${esc(app.data.settings.deepseekApiKey || '')}" style="width:100%;margin-top:8px" />
-      <input class="s-input" id="deepseekModel" placeholder="模型名，默认 deepseek-chat" value="${esc(app.data.settings.deepseekModel || 'deepseek-chat')}" style="width:100%;margin-top:8px" />
-      <div class="dl-hint" style="margin-top:8px">用 WorkBuddy 命令行需先完成一次 /login；用 DeepSeek API 会产生接口费用。</div>
+      <div class="s-desc" style="margin-top:8px">当前后端：<strong>${esc(app.data.env?.backend || '未知')}</strong>${app.data.env?.workbuddyCli ? ' · 已找到 WorkBuddy 命令行' : ''}${app.data.env?.apiConfigured ? ' · 已配置 AI 接口' : ''}</div>
+      <input class="s-input" id="apiBaseUrl" placeholder="Base URL，例如 https://api.deepseek.com" value="${esc(app.data.settings.apiBaseUrl || app.data.settings.deepseekBaseUrl || 'https://api.deepseek.com')}" style="width:100%;margin-top:8px" />
+      <input class="s-input" id="apiKey" type="password" placeholder="API Key（只存本机 data/settings.json，留空则不启用）" value="${esc(app.data.settings.apiKey || app.data.settings.deepseekApiKey || '')}" style="width:100%;margin-top:8px" />
+      <input class="s-input" id="apiModel" placeholder="模型名，例如 deepseek-chat" value="${esc(app.data.settings.apiModel || app.data.settings.deepseekModel || 'deepseek-chat')}" style="width:100%;margin-top:8px" />
+      <div class="dl-hint" style="margin-top:8px">DeepSeek 填 https://api.deepseek.com；OpenAI 填 https://api.openai.com/v1；其他兼容服务填到 /v1 为止。用 WorkBuddy 命令行需先完成一次 /login；用 AI 接口会产生接口费用。</div>
       <label class="switch" hidden><input type="checkbox" id="aiToggle" /></label>
     </div>
 
@@ -925,8 +926,9 @@ function bindSettings() {
       ocrImages: $('ocrToggle').checked,
       termStart: $('termStart').value || null,
       organizeBackend: $('organizeBackend').value,
-      deepseekApiKey: $('deepseekKey').value.trim(),
-      deepseekModel: $('deepseekModel').value.trim(),
+      apiBaseUrl: $('apiBaseUrl').value.trim(),
+      apiKey: $('apiKey').value.trim(),
+      apiModel: $('apiModel').value.trim(),
     };
     const res = await api('/api/settings', { method: 'POST', body: JSON.stringify(body) });
     if (res.ok) {

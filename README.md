@@ -58,10 +58,22 @@ Windows 版需要微信 4.x（`Weixin.exe`）。微信有新消息后，重新�
 | 后端 | 说明 |
 |---|---|
 | WorkBuddy 命令行 | 本机装了 WorkBuddy，并在终端完成一次 `/login` |
-| DeepSeek API | 在设置里填 DeepSeek API Key，会产生接口费用 |
+| AI 接口（OpenAI 兼容） | 在设置里填 Base URL、API Key、模型名，会产生接口费用 |
 | 只写请求（队列） | 应用只记录整理请求，由外部 AI 用 `wb-bridge.mjs` 接手 |
 
-自动模式会优先选 WorkBuddy，其次 DeepSeek。
+自动模式会优先选 WorkBuddy，其次 AI 接口。API Key 只保存在本机 `data/settings.json`（已 gitignore），不会上传。
+
+常见服务的填法：
+
+| 服务 | Base URL | 模型名示例 |
+|---|---|---|
+| DeepSeek | `https://api.deepseek.com` | `deepseek-chat` |
+| OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` |
+| Moonshot | `https://api.moonshot.cn/v1` | `moonshot-v1-8k` |
+| 硅基流动 | `https://api.siliconflow.cn/v1` | `deepseek-ai/DeepSeek-V3` |
+| OpenRouter | `https://openrouter.ai/api/v1` | `deepseek/deepseek-chat` |
+
+> Base URL 一般填到 `/v1` 为止；DeepSeek 可以不带 `/v1`。填错时接口会返回 404，设置里会提示「检查 Base URL」。
 
 ## 目录结构
 

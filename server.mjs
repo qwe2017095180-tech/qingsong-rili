@@ -311,6 +311,7 @@ const server = http.createServer(async (req, res) => {
             engine: b.backend,
             backend: b.backend,
             workbuddyCli: b.workbuddyCli,
+            apiConfigured: b.apiConfigured,
             deepseekConfigured: b.deepseekConfigured,
             platform: b.platform,
             version: readVersion().version,
@@ -367,12 +368,16 @@ const server = http.createServer(async (req, res) => {
       }
       if (typeof body.ocrImages === 'boolean') s.ocrImages = body.ocrImages;
       if (typeof body.organizeBackend === 'string') {
-        s.organizeBackend = ['auto', 'workbuddy', 'deepseek', 'queue', 'none'].includes(body.organizeBackend)
+        s.organizeBackend = ['auto', 'workbuddy', 'openai', 'deepseek', 'queue', 'none'].includes(body.organizeBackend)
           ? body.organizeBackend : 'auto';
       }
-      if (typeof body.deepseekApiKey === 'string') s.deepseekApiKey = body.deepseekApiKey.trim().slice(0, 200);
-      if (typeof body.deepseekModel === 'string') s.deepseekModel = body.deepseekModel.trim().slice(0, 60);
-      if (typeof body.deepseekBaseUrl === 'string') s.deepseekBaseUrl = body.deepseekBaseUrl.trim().slice(0, 200);
+      if (typeof body.apiBaseUrl === 'string') s.apiBaseUrl = body.apiBaseUrl.trim().slice(0, 300);
+      if (typeof body.apiKey === 'string') s.apiKey = body.apiKey.trim().slice(0, 300);
+      if (typeof body.apiModel === 'string') s.apiModel = body.apiModel.trim().slice(0, 80);
+      // 兼容旧字段
+      if (typeof body.deepseekApiKey === 'string') s.apiKey = body.deepseekApiKey.trim().slice(0, 300);
+      if (typeof body.deepseekModel === 'string') s.apiModel = body.deepseekModel.trim().slice(0, 80);
+      if (typeof body.deepseekBaseUrl === 'string') s.apiBaseUrl = body.deepseekBaseUrl.trim().slice(0, 300);
       if (typeof body.termStart === 'string' || body.termStart === null) {
         s.termStart = body.termStart && /^\d{4}-\d{2}-\d{2}$/.test(body.termStart) ? body.termStart : null;
       }
