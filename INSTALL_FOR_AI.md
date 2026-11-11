@@ -22,15 +22,42 @@
 
 如果 `node` 或 `python` 不在 PATH，先安装并重开终端。Node 从 https://nodejs.org 装 LTS 版即可。
 
-## 2. 解压与目录结构
+### 先确认微信数据目录在哪（关键，别跳过）
 
-把压缩包解压到例如 `C:\qingsong-rili`，确认目录里有：
+提 key 和解密都依赖这个路径。脚本默认找 `C:\Users\<你>\Documents\xwechat_files`，
+但很多人改过位置（把微信装到 D/E 盘、或手动改过存储路径）。先探一下：
+
+```powershell
+Get-ChildItem -Path C:\,D:\,E:\,F:\ -Directory -Filter xwechat_files -Depth 3 -ErrorAction SilentlyContinue | Select-Object FullName
+```
+
+- 结果里有 `...\Documents\xwechat_files` → 用默认路径，后面不用设环境变量。
+- 结果是别的路径（例如 `E:\chat\xwechat_files`）→ **后面第 4、5 步以及日常同步，每条命令都要先设**：
+
+```powershell
+$env:WECHAT_DATA_ROOT = "E:\chat\xwechat_files"
+```
+
+不设的话，`extract_raw_key.py` 会直接报 `message_0.db not found` 退出（它在杀微信进程之前就检查，不会破坏当前微信状态）。
+
+## 2. 获取代码与目录结构
+
+推荐用 git 克隆，方便以后 `git pull` 更新：
+
+```powershell
+git clone https://github.com/qwe2017095180-tech/qingsong-rili.git C:\qingsong-rili
+cd C:\qingsong-rili
+```
+
+也可以直接下载 zip 解压。确认目录里有：
 
 ```
 server.mjs  mcp-server.mjs  wb-bridge.mjs  start.bat  start.ps1
-lib\        public\        data\
-vendor\wechat-decrypt\    ← 微信读取与解密脚本（自带，不用另外下载）
+lib\        public\        vendor\wechat-decrypt\
+desktop\    ← 可选的 Electron 桌面壳，见第 14 节
 ```
+
+`data\` 不用手动建，首次运行会自动创建。
 
 以下命令都在项目根目录执行（PowerShell 里先 `cd C:\qingsong-rili`）。
 
@@ -70,6 +97,8 @@ cd C:\qingsong-rili\vendor\wechat-decrypt
 
 ```powershell
 cd C:\qingsong-rili\vendor\wechat-decrypt
+# 第 1 节探测到的路径不是默认值时，先执行这一行
+$env:WECHAT_DATA_ROOT = "E:\chat\xwechat_files"
 .\.venv\Scripts\python.exe scripts\windows\decrypt_all.py
 ```
 
@@ -137,6 +166,7 @@ node wb-bridge.mjs complete <请求id> '{"items":3,"added":2,"updated":1}'
 ## 10. 验收清单（必须逐项确认）
 
 - [ ] `node -v` ≥ 18，`python --version` ≥ 3.9
+- [ ] 已确认微信数据目录真实路径，非默认值时 `WECHAT_DATA_ROOT` 已生效
 - [ ] `vendor\wechat-decrypt\.venv\Scripts\python.exe -c "import Crypto, frida"` 成功
 - [ ] `key_windows.txt` 存在，内容是 64 位十六进制
 - [ ] `vendor\wechat-decrypt\decrypted\<账号>\db_storage\message\message_0.db` 存在
@@ -155,6 +185,16 @@ node wb-bridge.mjs complete <请求id> '{"items":3,"added":2,"updated":1}'
 
 **提 key 失败 / frida 报错**
 → 确认微信是 4.x（`Weixin.exe`，不是 `WeChat.exe`）；用管理员 PowerShell；微信保持登录；关掉安全软件对 frida 的拦截后重试。
+
+**`extract_raw_key.py` 报 `ERR: message_0.db not found`**
+→ 微信数据目录不在默认位置。回到第 1 节探测真实路径，设 `$env:WECHAT_DATA_ROOT` 后重试。
+这个错误在杀微信进程之前就抛出，不会影响当前微信状态。
+
+**`decrypt_all.py` 报 `no encrypted db_storage found`**
+→ 同上，缺 `WECHAT_DATA_ROOT`。
+
+**提 key 成功但 `decrypted\` 是空的**
+→ `decrypt_all.py` 跑的时候没带环境变量，读到的是默认路径。带上 `WECHAT_DATA_ROOT` 重跑。
 
 **`node wb-bridge.mjs pending` 输出「0 个群」**
 → 界面里还没勾选群；或 `data\settings.json` 的 `groups` 为空。先在界面选群。
@@ -179,5 +219,40 @@ node wb-bridge.mjs complete <请求id> '{"items":3,"added":2,"updated":1}'
 ## 13. 日常使用
 
 - 有新消息时：重新跑一次 `decrypt_all.py`（同步明文库），然后在界面点「立即整理」。
+  数据目录不是默认值时记得带 `$env:WECHAT_DATA_ROOT`。
 - 想省事可以做一个计划任务：每天固定时间跑 `decrypt_all.py`，再调 `http://127.0.0.1:7788/api/run`。
 - 娱乐群整理在「🎮 娱乐」模式里，逻辑与通知分开。
+
+## 14. 可选：桌面版（独立应用窗口）
+
+根目录的 `start.bat` 是「命令行 + 浏览器」形态。如果用户要的是**独立应用窗口**和**桌面图标**，
+装 `desktop\` 这一层 Electron 壳。它不复制业务代码，只负责拉起 `server.mjs` 再套一个窗口。
+
+```powershell
+cd C:\qingsong-rili\desktop
+npm install
+npm start            # 先验证窗口能开
+```
+
+国内下载 Electron 二进制可能卡住（走 GitHub），用镜像：
+
+```powershell
+$env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/"
+npm install
+node node_modules\electron\install.js
+```
+
+生成桌面与开始菜单图标：
+
+```powershell
+node build\make-shortcuts.js
+```
+
+注意事项：
+
+- `node_modules\` 约 300MB，不进仓库，每台机器都要自己 `npm install`。
+- 桌面版**依赖系统 Python 环境**读取微信，和网页版一样，不能只装 Electron。
+- 关闭窗口会结束它自己拉起的服务；如果端口上已有服务（比如先前双击过 `start.bat`），
+  桌面版只附着上去，退出时不会关掉那个服务。
+- 若终端里带着 `ELECTRON_RUN_AS_NODE=1`（某些 IDE/宿主会注入），Electron 会退化成纯 Node，
+  `main.js` 会直接提示并退出。从桌面图标启动不受影响。
