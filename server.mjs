@@ -327,11 +327,14 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, { ok: false, error: '还没有配置 GitHub 仓库（version.json 的 repo 字段）' });
       }
       try {
-        const r = await fetch(`https://raw.githubusercontent.com/${repo}/main/version.json`, {
+        // 用 api.github.com 读文件内容：部分网络环境访问不了 raw.githubusercontent.com
+        const r = await fetch(`https://api.github.com/repos/${repo}/contents/version.json`, {
+          headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'qingsong-rili' },
           signal: AbortSignal.timeout(10_000),
         });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const remote = await r.json();
+        const body = await r.json();
+        const remote = JSON.parse(Buffer.from(body.content || '', 'base64').toString('utf8'));
         return send(res, 200, {
           ok: true,
           current: local.version,
