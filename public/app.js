@@ -906,7 +906,7 @@ function bindSettings() {
       box.innerHTML = `发现新版本 <strong>${esc(r.latest)}</strong>（当前 ${esc(r.current)}）<br/>${esc(r.notes || '')}`;
       const go = document.createElement('button');
       go.className = 'btn primary';
-      go.textContent = '打开发布页';
+      go.textContent = '打开 GitHub';
       go.style.marginTop = '8px';
       go.onclick = () => api('/api/open', { method: 'POST', body: JSON.stringify({ url: r.url }) });
       box.appendChild(document.createElement('br'));
