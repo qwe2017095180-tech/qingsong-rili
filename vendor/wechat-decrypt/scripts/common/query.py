@@ -83,6 +83,75 @@ def list_chats() -> list[dict]:
             for _table, wxid in sorted(name2id.items(), key=lambda x: x[1])]
 
 
+def _session_db_path() -> str:
+    return os.path.join(db.find_data_dir(), "session", "session.db")
+
+
+# 微信内置账号：出现在会话表里但不对应真人
+_SYSTEM_ACCOUNTS = {
+    "fmessage", "medianote", "floatbottle", "notifymessage", "newsapp",
+    "brandsessionholder", "brandsessionholder_weapp", "qqmail", "qqsync",
+    "weixin", "weibo", "voicevoipapp", "voipapp", "tmessage", "qmessage",
+    "officialaccounts", "notification_messages", "exmail_tool",
+}
+
+
+def list_sessions(limit: int | None = None) -> list[dict] | None:
+    """真实会话列表，按最近活跃时间倒序。
+
+    与 list_chats() 的区别：Name2Id 是「发过言的账号」表，群成员的 wxid 也在里面，
+    直接用它当会话列表会把大量群友混进来。这里改读 session.db 的 SessionTable，
+    只保留微信聊天列表里真实存在的会话，并带出最后活跃时间用于排序。
+
+    返回 None 表示没有 session.db，调用方应回退到 list_chats()。
+    """
+    path = _session_db_path()
+    if not os.path.exists(path):
+        return None
+    rows = db.query(
+        path,
+        "SELECT username, sort_timestamp, last_timestamp, is_hidden FROM SessionTable;",
+    )
+    contacts_map = db.load_contacts_from_db()
+    out = []
+    for row in rows:
+        wxid = (row.get("username") or "").strip()
+        if not wxid:
+            continue
+        meta = contacts_map.get(wxid) or {}
+        try:
+            local_type = int(meta.get("local_type") or 0)
+        except (TypeError, ValueError):
+            local_type = 0
+        is_group = wxid.endswith("@chatroom")
+        # contact.local_type：1 = 好友，3 = 群成员，4 = 公众号，5/6/7 = 企业微信/客服
+        # 公众号与系统号即使 local_type 标成 1，也不该当好友展示
+        is_official = wxid.startswith("gh_") or wxid in _SYSTEM_ACCOUNTS
+        is_friend = (not is_group) and (not is_official) and local_type == 1
+        if is_group:
+            kind = "group"
+        elif is_friend:
+            kind = "friend"
+        else:
+            kind = "other"
+        try:
+            ts = int(row.get("sort_timestamp") or row.get("last_timestamp") or 0)
+        except (TypeError, ValueError):
+            ts = 0
+        out.append({
+            "wxid": wxid,
+            "display": contacts.resolve_contact_name(wxid),
+            "isGroup": is_group,
+            "isFriend": is_friend,
+            "kind": kind,
+            "ts": ts,
+        })
+    out.sort(key=lambda c: c["ts"], reverse=True)
+    if limit:
+        out = out[:limit]
+    return out
+
+
 def _validate_window(days: int, limit: int | None = None):
     if type(days) is not int or days < 1:
         raise ValueError('days must be a positive integer')
@@ -499,6 +568,12 @@ def _human(cmd: str, r) -> str:
         return r["error"] + ("\n" + "\n".join(f"  {c['display']} (wxid: {c['wxid']})" for c in r.get("candidates", [])) if r.get("candidates") else "")
     if cmd == "list":
         return f"共 {len(r)} 个对话:\n" + "\n".join(f"  {c['display']} (wxid: {c['wxid']})" for c in r)
+    if cmd == "sessions":
+        if r is None:
+            return "未找到 session.db，请先运行 decrypt_all.py"
+        label = {"group": "群聊", "friend": "好友", "other": "其他"}
+        return f"共 {len(r)} 个会话（按最近活跃排序）:\n" + "\n".join(
+            f"  [{label.get(c['kind'], c['kind'])}] {c['display']} (wxid: {c['wxid']})" for c in r)
     if cmd == "read":
         out = []
         for chat in r["chats"]:
@@ -561,6 +636,7 @@ def main():
     base.add_argument("--json", action="store_true", help="结构化 JSON 输出")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("list", parents=[base]); p.add_argument('-n', '--limit', type=int); p.add_argument('--offset', type=int, default=0)
+    p = sub.add_parser("sessions", parents=[base]); p.add_argument('-n', '--limit', type=int)
     p = sub.add_parser("read", parents=[base]); p.add_argument("contact"); p.add_argument("-n", "--limit", type=int, default=50); p.add_argument("-d", "--days", type=int, default=7)
     p = sub.add_parser("search", parents=[base]); p.add_argument("keyword"); p.add_argument("-d", "--days", type=int, default=30); p.add_argument("-n", "--limit", type=int, default=50)
     p = sub.add_parser("recent", parents=[base]); p.add_argument("-d", "--days", type=int, default=3); p.add_argument("-n", "--limit", type=int, default=100)
@@ -576,6 +652,8 @@ def main():
             a.cmd = 'list-page'
         else:
             r = list_chats()
+    elif a.cmd == "sessions":
+        r = list_sessions(a.limit)
     elif a.cmd == "read":
         r = read_chat(a.contact, a.limit, a.days)
     elif a.cmd == "search":

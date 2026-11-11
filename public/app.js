@@ -37,6 +37,18 @@ const app = {
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// 会话最后活跃时间：秒级时间戳 → 相对描述
+function relTime(ts) {
+  if (!ts) return '';
+  const diff = Date.now() / 1000 - ts;
+  if (diff < 60) return '刚刚';
+  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
+  if (diff < 86400 * 7) return `${Math.floor(diff / 86400)} 天前`;
+  const d = new Date(ts * 1000);
+  return `${d.getMonth() + 1}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 // ── 时间工具 ──────────────────────────────────────────────
 function parseDeadline(s) {
   if (!s) return null;
@@ -695,8 +707,10 @@ async function loadGroups() {
 function renderSettings() {
   const d = app.draft;
   if (!d) return;
-  const groups = app.groupCache || [];
+  const all = app.groupCache || [];
   const chosen = new Map(d.groups.map((g) => [g.wxid, g]));
+  // 只展示群聊与好友；已勾选但被过滤的仍保留，否则用户没法取消它
+  const groups = all.filter((g) => g.isGroup || g.isFriend || chosen.has(g.wxid));
   const q = app.groupQuery.toLowerCase();
   const filtered = groups.filter((g) => !q || g.display.toLowerCase().includes(q) || (g.isGroup ? '群' : '人').includes(q));
 
@@ -717,7 +731,7 @@ function renderSettings() {
 
     <div class="s-block">
       <div class="s-title">📚 整理哪些群 <span style="font-weight:400;color:var(--muted);font-size:12.5px">已选 ${d.groups.length} 个</span></div>
-      <div class="s-desc">只读你勾选的群。可以搜群名，比如"班群""通知""兼职"。</div>
+      <div class="s-desc">按最近活跃排序，只显示群聊和你加的好友。可以搜群名，比如"班群""通知""兼职"。</div>
       <input class="s-input grp-search" id="grpSearch" placeholder="搜索群名…" value="${esc(app.groupQuery)}" />
       <div class="grp-list" id="grpList">
         ${groups.length === 0
@@ -727,7 +741,8 @@ function renderSettings() {
             : filtered.map((g) => `<label class="grp-row">
                 <input type="checkbox" data-wxid="${esc(g.wxid)}" ${chosen.has(g.wxid) ? 'checked' : ''} />
                 <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(g.display)}</span>
-                <span class="tag">${g.isGroup ? '群聊' : '联系人'}</span>
+                <span class="grp-time">${relTime(g.ts)}</span>
+                <span class="tag">${g.isGroup ? '群聊' : (g.isFriend ? '好友' : '其他')}</span>
               </label>`).join('')}
       </div>
     </div>
@@ -742,13 +757,14 @@ function renderSettings() {
           : (() => {
               const fq = (app.funQuery || '').toLowerCase();
               const fh = new Map(d.funGroups.map((g) => [g.wxid, g]));
-              const list = groups.filter((g) => !fq || g.display.toLowerCase().includes(fq));
+              const list = groups.filter((g) => (g.isGroup || fh.has(g.wxid)) && (!fq || g.display.toLowerCase().includes(fq)));
               return list.length === 0
                 ? `<div class="grp-empty">没有匹配的群</div>`
                 : list.map((g) => `<label class="grp-row">
                     <input type="checkbox" data-funwxid="${esc(g.wxid)}" ${fh.has(g.wxid) ? 'checked' : ''} />
                     <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(g.display)}</span>
-                    <span class="tag">${g.isGroup ? '群聊' : '联系人'}</span>
+                    <span class="grp-time">${relTime(g.ts)}</span>
+                    <span class="tag">群聊</span>
                   </label>`).join('');
             })()}
       </div>
@@ -837,15 +853,17 @@ function bindSettings() {
     app.groupQuery = search.value;
     const sel = document.getElementById('grpList');
     const q = search.value.toLowerCase();
-    const groups = app.groupCache || [];
     const chosen = new Map(d.groups.map((g) => [g.wxid, g]));
-    const filtered = groups.filter((g) => !q || g.display.toLowerCase().includes(q));
+    const filtered = (app.groupCache || [])
+      .filter((g) => g.isGroup || g.isFriend || chosen.has(g.wxid))
+      .filter((g) => !q || g.display.toLowerCase().includes(q));
     sel.innerHTML = filtered.length === 0
       ? `<div class="grp-empty">没有匹配的群</div>`
       : filtered.map((g) => `<label class="grp-row">
           <input type="checkbox" data-wxid="${esc(g.wxid)}" ${chosen.has(g.wxid) ? 'checked' : ''} />
           <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(g.display)}</span>
-          <span class="tag">${g.isGroup ? '群聊' : '联系人'}</span>
+          <span class="grp-time">${relTime(g.ts)}</span>
+          <span class="tag">${g.isGroup ? '群聊' : (g.isFriend ? '好友' : '其他')}</span>
         </label>`).join('');
   };
   // 娱乐群搜索与勾选
@@ -853,14 +871,17 @@ function bindSettings() {
   if (funSearch) {
     funSearch.oninput = () => {
       const q = funSearch.value.toLowerCase();
-      const list = (app.groupCache || []).filter((g) => !q || g.display.toLowerCase().includes(q));
       const chosen = new Map(d.funGroups.map((g) => [g.wxid, g]));
+      const list = (app.groupCache || [])
+        .filter((g) => g.isGroup || chosen.has(g.wxid))
+        .filter((g) => !q || g.display.toLowerCase().includes(q));
       $('funList').innerHTML = list.length === 0
         ? `<div class="grp-empty">没有匹配的群</div>`
         : list.map((g) => `<label class="grp-row">
             <input type="checkbox" data-funwxid="${esc(g.wxid)}" ${chosen.has(g.wxid) ? 'checked' : ''} />
             <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(g.display)}</span>
-            <span class="tag">${g.isGroup ? '群聊' : '联系人'}</span>
+            <span class="grp-time">${relTime(g.ts)}</span>
+            <span class="tag">群聊</span>
           </label>`).join('');
     };
   }
