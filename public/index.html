@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>轻松日程</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<div class="blob blob-a"></div>
+<div class="blob blob-b"></div>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">🌤️</div>
+    <div class="brand-text">
+      <h1>轻松日程</h1>
+      <p>把群消息，变成看得懂的待办</p>
+    </div>
+  </div>
+  <div class="mode-switch" id="modeSwitch">
+    <button data-mode="notice" class="on">📋 通知</button>
+    <button data-mode="fun">🎮 娱乐</button>
+  </div>
+  <div class="top-actions">
+    <div class="next-run" id="nextRun">—</div>
+    <button class="btn primary" id="runBtn"><span class="spark">✦</span> 立即整理</button>
+    <button class="btn ghost" id="addBtn" title="手动添加待办">＋ 手动添加</button>
+    <button class="btn ghost" id="settingsBtn" title="设置">⚙️</button>
+  </div>
+</header>
+
+<div class="runbar" id="runBar" hidden>
+  <div class="runbar-inner">
+    <span class="pulse"></span>
+    <span id="runText">正在整理…</span>
+    <div class="runbar-track"><div class="runbar-fill" id="runFill"></div></div>
+  </div>
+</div>
+
+<div class="toastbar" id="toast" hidden></div>
+
+<nav class="tabs" id="tabs"></nav>
+
+<div class="archive-bar" id="archiveBar" hidden>
+  <span id="archiveBarText">—</span>
+  <button class="btn ghost" id="clearArchiveBtn">🗑 一键删除全部归档</button>
+</div>
+
+<main id="grid" class="grid"></main>
+
+<section class="empty" id="empty" hidden>
+  <div class="empty-art">🌱</div>
+  <h2 id="emptyTitle">还没有整理过</h2>
+  <p id="emptyText">先去设置里挑几个群，然后点「立即整理」，<br/>我会把里面的作业、兼职、比赛、活动都捞出来。</p>
+  <button class="btn primary" id="emptyAction">去选择群</button>
+</section>
+
+<div class="mask" id="mask" hidden></div>
+
+<aside class="drawer" id="drawer" hidden></aside>
+
+<aside class="drawer settings" id="settingsDrawer" hidden>
+  <div class="drawer-head">
+    <h2>设置</h2>
+    <button class="close" id="closeSettings">×</button>
+  </div>
+  <div class="drawer-body" id="settingsBody"></div>
+  <div class="s-foot-fixed">
+    <button class="btn primary" id="saveSettings" style="flex:1">保存设置</button>
+    <button class="btn ghost" id="cancelSettings">取消</button>
+  </div>
+</aside>
+
+<aside class="drawer settings" id="addDrawer" hidden>
+  <div class="drawer-head">
+    <h2>手动添加待办</h2>
+    <button class="close" id="closeAdd">×</button>
+  </div>
+  <div class="drawer-body">
+    <div class="s-block">
+      <div class="s-title">📋 把内容粘进来</div>
+      <div class="s-desc">从微信复制的一段通知、或者自己随手记的一句话都行。WorkBuddy 会帮你拆成事项、写好标题和截止时间，并<strong>直接放进「待办」栏</strong>。</div>
+      <textarea id="addText" class="s-input" placeholder="例如：下周三前把设计表达作业交到接龙管家，顺便买两张 A3 纸…" style="width:100%;height:170px;resize:vertical;padding:12px;line-height:1.6"></textarea>
+    </div>
+    <div class="s-block">
+      <div class="s-title">🏷️ 来源（可不填）</div>
+      <div class="s-desc">填个群名或备注，卡片上会标出来；留空就写「手动添加」。</div>
+      <input class="s-input" id="addSource" placeholder="例如：班群 / 自己记的" style="width:100%" />
+    </div>
+    <div class="s-block">
+      <div class="s-title">⏱️ 什么时候整理好</div>
+      <div class="s-desc">点「交给 WorkBuddy 整理」后当场就整理完，卡片会直接出现在「待办」栏，不用等、也不用再来对话里催。<br/>首次使用需先在终端完成一次 WorkBuddy 命令行登录。</div>
+    </div>
+  </div>
+  <div class="s-foot-fixed">
+    <button class="btn primary" id="submitAdd" style="flex:1">交给 WorkBuddy 整理</button>
+    <button class="btn ghost" id="cancelAdd">取消</button>
+  </div>
+</aside>
+
+<script src="/app.js"></script>
+<script src="/add.js"></script>
+</body>
+</html>

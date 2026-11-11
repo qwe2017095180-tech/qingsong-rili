@@ -1,0 +1,27 @@
+# 个人数据：聊天摘要、群配置、整理记录，绝不入库
+data/
+
+# 微信密钥与解密后的聊天库
+vendor/wechat-decrypt/key*.txt
+vendor/wechat-decrypt/per_db_keys.json
+vendor/wechat-decrypt/all_keys.json
+vendor/wechat-decrypt/decrypted/
+vendor/wechat-decrypt/.venv/
+vendor/wechat-decrypt/__pycache__/
+*.key
+*.pem
+
+# 打包产物与本机工具
+dist/
+build/
+*.zip
+shots/
+.workbuddy-ai/
+
+# 含本机绝对路径的对接记录，不入库
+对接指南-WorkBuddy.md
+
+# 系统与依赖
+.DS_Store
+node_modules/
+__pycache__/
