@@ -51,6 +51,12 @@ app.whenReady().then(async () => {
           titles: Array.from(items).map((x) => x.querySelector('.ann-title')?.innerText || ''),
           hasNewBadge: !!document.querySelector('.ann-new'),
           firstH: document.querySelector('#annBody .ann-h')?.innerText || '',
+          links: Array.from(document.querySelectorAll('#annBody a')).map((a) => ({
+            text: a.innerText,
+            href: a.getAttribute('href'),
+            blank: a.getAttribute('target'),
+            color: getComputedStyle(a).color,
+          })),
         };
       }
       const rows = document.querySelectorAll('#grpList .grp-row');

@@ -995,3 +995,14 @@ input[type="time"]:focus, .s-input:focus, .s-select:focus { border-color: #bfe6d
   font-size: 12.5px;
   overflow-x: auto;
 }
+
+.ann-content a {
+  color: #2f7fd0;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(47, 127, 208, 0.3);
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.ann-content a:hover {
+  color: #1f66b0;
+  border-bottom-color: currentColor;
+}

@@ -1,7 +1,7 @@
 {
-  "version": "1.1.0",
+  "version": "1.1.1",
   "releasedAt": "2026-11-11",
-  "notes": "新增桌面版与应用内公告；群列表改为按最近活跃排序、只显示群聊与好友；修复群名含 emoji 时群列表读取失败。",
+  "notes": "公告里的网址改为可点击链接，点击用系统浏览器打开；新增桌面版与应用内公告；群列表改为按最近活跃排序、只显示群聊与好友；修复群名含 emoji 时群列表读取失败。",
   "repo": "qwe2017095180-tech/qingsong-rili",
   "download": "https://github.com/qwe2017095180-tech/qingsong-rili"
 }

@@ -1105,11 +1105,20 @@ function cmpVersion(a, b) {
   return 0;
 }
 
-// 行内格式：**加粗**、`代码`
+// 行内格式：**加粗**、`代码`、[文字](链接)、裸 URL 自动成链
+// 代码和链接先抽成占位符，避免里面的字符被后续规则二次处理
 function fmtInline(text) {
-  return esc(text)
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>');
+  const stash = [];
+  const keep = (html) => `\u0000${stash.push(html) - 1}\u0000`;
+  const anchor = (href, label) =>
+    `<a href="${href}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+
+  let s = esc(text);
+  s = s.replace(/`([^`]+)`/g, (_, code) => keep(`<code>${code}</code>`));
+  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, label, url) => keep(anchor(url, label)));
+  s = s.replace(/(https?:\/\/[^\s<>"'\u0000）)]+)/g, (m) => keep(anchor(m, m)));
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => stash[Number(i)]);
 }
 
 function renderBlock(b) {
