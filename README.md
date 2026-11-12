@@ -57,11 +57,11 @@ Windows 版需要微信 4.x（`Weixin.exe`）。微信有新消息后，重新�
 
 | 后端 | 说明 |
 |---|---|
-| WorkBuddy 命令行 | 本机装了 WorkBuddy，并在终端完成一次 `/login` |
 | AI 接口（OpenAI 兼容） | 在设置里填 Base URL、API Key、模型名，会产生接口费用 |
+| WorkBuddy 命令行 | 本机装了 WorkBuddy，并在终端完成一次 `/login` |
 | 只写请求（队列） | 应用只记录整理请求，由外部 AI 用 `wb-bridge.mjs` 接手 |
 
-自动模式会优先选 WorkBuddy，其次 AI 接口。API Key 只保存在本机 `data/settings.json`（已 gitignore），不会上传。
+自动模式会**优先走 AI 接口**（填了 Key 就用它），没填 Key 才回退到 WorkBuddy 命令行。API Key 只保存在本机 `data/settings.json`（已 gitignore），不会上传。
 
 常见服务的填法：
 

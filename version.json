@@ -1,7 +1,7 @@
 {
-  "version": "1.1.1",
-  "releasedAt": "2026-11-11",
-  "notes": "公告里的网址改为可点击链接，点击用系统浏览器打开；新增桌面版与应用内公告；群列表改为按最近活跃排序、只显示群聊与好友；修复群名含 emoji 时群列表读取失败。",
+  "version": "1.1.2",
+  "releasedAt": "2026-11-12",
+  "notes": "整理通道改为优先使用自己配置的 AI 接口，没填 Key 才回退到本机 WorkBuddy 命令行；进度提示统一为「正在整理…」；公告里的网址可点击打开。",
   "repo": "qwe2017095180-tech/qingsong-rili",
   "download": "https://github.com/qwe2017095180-tech/qingsong-rili"
 }

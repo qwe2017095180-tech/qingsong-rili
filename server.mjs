@@ -139,7 +139,7 @@ async function runOrganize({ trigger = 'manual' } = {}) {
       return;
     }
 
-    state.phase = '正在由 WorkBuddy 整理…';
+    state.phase = '正在整理…';
     const packed = messagesToText(chats.filter((c) => c.messages.length), { maxCharsPerGroup: 12000 });
     let dismissed = [];
     try {

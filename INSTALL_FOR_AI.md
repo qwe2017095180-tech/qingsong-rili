@@ -139,9 +139,9 @@ node wb-bridge.mjs pending
 2. 设置自动整理时间（默认 20:00）和「往回看多久」（默认 24 小时）。
 3. 填「学期开始日期」（第一周周一，例如 `2026-09-14`），用于把「第 N 周」换算成日期。
 4. 选「谁来整理」：
-   - **自动**：有 WorkBuddy 命令行就用它，否则用 AI 接口（需填 Base URL、Key、模型名）。
-   - **WorkBuddy 命令行**：需要本机装了 WorkBuddy 并完成一次 `/login`。
+   - **自动**：填了 API Key 就走 AI 接口，没填才回退到 WorkBuddy 命令行。
    - **AI 接口（OpenAI 兼容）**：填 Base URL、API Key、模型名（DeepSeek / OpenAI / Moonshot / 硅基流动等），只存本机 `data/settings.json`，会产生接口费用。
+   - **WorkBuddy 命令行**：需要本机装了 WorkBuddy 并完成一次 `/login`。
    - **只写请求，交给外部 AI**：应用不调模型，整理请求写进队列，由外部 AI 用 `wb-bridge.mjs` 接手。
 5. 保存设置。
 
@@ -149,9 +149,11 @@ node wb-bridge.mjs pending
 
 | 后端 | 适用情况 | 点「立即整理」的效果 |
 |---|---|---|
-| WorkBuddy 命令行 | 本机装了 WorkBuddy | 当场调模型，约 20–60 秒出卡片 |
-| AI 接口（OpenAI 兼容） | 没装 WorkBuddy，但有 API Key | 当场调模型，约 10–30 秒出卡片 |
+| AI 接口（OpenAI 兼容） | 有自己的 API Key（推荐，最可控） | 当场调模型，约 10–30 秒出卡片 |
+| WorkBuddy 命令行 | 本机装了 WorkBuddy，且不想另外付费 | 当场调模型，约 20–60 秒出卡片 |
 | 只写请求（队列） | 都不想配 | 只记一个请求，外部 AI 用 `wb-bridge.mjs` 处理 |
+
+> 自动模式优先走 AI 接口：填了 Key 就用它，避免在不知情的情况下依赖本机 WorkBuddy。
 
 队列模式的用法（给外部 AI）：
 

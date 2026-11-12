@@ -1,4 +1,4 @@
-/* 手动添加待办：把粘贴的原文交给 WorkBuddy 整理成待办卡片 */
+/* 手动添加待办：把粘贴的原文交给 AI 整理成待办卡片 */
 const addUI = {
   open() {
     const $ = (id) => document.getElementById(id);
@@ -8,7 +8,7 @@ const addUI = {
     $('addText').value = '';
     $('addSource').value = '';
     $('submitAdd').disabled = false;
-    $('submitAdd').textContent = '交给 WorkBuddy 整理';
+    $('submitAdd').textContent = '开始整理';
     $('mask').hidden = false;
     $('addDrawer').hidden = false;
     setTimeout(() => $('addText').focus(), 60);
@@ -26,7 +26,7 @@ const addUI = {
     if (!text) { toast('先粘贴一段内容'); $('addText').focus(); return; }
     const source = $('addSource').value.trim();
     $('submitAdd').disabled = true;
-    $('submitAdd').textContent = '正在由 WorkBuddy 整理…';
+    $('submitAdd').textContent = '正在整理…';
     try {
       const res = await api('/api/manual/add', {
         method: 'POST',
@@ -42,7 +42,7 @@ const addUI = {
       toast('提交失败，请确认本地服务还开着');
     } finally {
       $('submitAdd').disabled = false;
-      $('submitAdd').textContent = '交给 WorkBuddy 整理';
+      $('submitAdd').textContent = '开始整理';
     }
   },
 };
