@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { store, cryptoId, norm, textSim } from './lib/store.mjs';
 import { listChats, readChat, messagesToText, wechatReady } from './lib/wechat.mjs';
-import { organizeWithModel, backendStatus } from './lib/workbuddy-model.mjs';
+import { organizeWithModel, backendStatus, pickBackend } from './lib/workbuddy-model.mjs';
 import { summarizeFun } from './lib/fun-summary.mjs';
 import { pending, recent, complete } from './lib/queue.mjs';
 
@@ -140,7 +140,11 @@ async function runOrganize({ trigger = 'manual' } = {}) {
     }
 
     state.phase = '正在整理…';
-    const packed = messagesToText(chats.filter((c) => c.messages.length), { maxCharsPerGroup: 12000 });
+    // 按群数平分 60000 字符预算：否则前面的群吃满额度，
+    // 后面的群会被 buildPrompt 的 slice 静默截掉，用户完全看不出来。
+    const active = chats.filter((c) => c.messages.length);
+    const perGroup = Math.max(1500, Math.floor(60000 / Math.max(1, active.length)));
+    const packed = messagesToText(active, { maxCharsPerGroup: Math.min(12000, perGroup) });
     let dismissed = [];
     try {
       dismissed = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'dismissed.json'), 'utf8'));
@@ -166,7 +170,7 @@ async function runOrganize({ trigger = 'manual' } = {}) {
       : { added: 0, updated: 0 };
     finishRun({
       runId, trigger, totalMsgs, items: fresh.length, added, updated,
-      engine: 'workbuddy',
+      engine: pickBackend(store.settings),
       note: fresh.length ? null : '这段时间没有可整理的新通知',
       groups: groups.length, failedGroups,
       durationMs: Date.now() - startedAt,
@@ -430,7 +434,7 @@ const server = http.createServer(async (req, res) => {
         finishRun({
           runId: 'paste-' + cryptoId(), trigger: 'paste', type: 'manual',
           totalMsgs: 1, items: todos.length, added, updated,
-          engine: 'workbuddy', groups: 1, durationMs: 0,
+          engine: pickBackend(store.settings), groups: 1, durationMs: 0,
         });
         return send(res, 200, { ok: true, added, updated, items: todos.length });
       } catch (e) {
