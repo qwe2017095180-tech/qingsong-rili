@@ -24,7 +24,8 @@ const FUN_CATS = Object.keys(FUN_META);
 const app = {
   data: null,
   mode: 'notice',          // notice | fun
-  tab: 'all',
+  tab: 'today',
+  selectedDay: new Date(),
   funTab: 'all',
   selectedId: null,
   groupCache: null,
@@ -56,6 +57,37 @@ function parseDeadline(s) {
   if (!m) return null;
   const d = new Date(+m[1], +m[2] - 1, +m[3], m[4] ? +m[4] : 23, m[5] ? +m[5] : 59, 0, 0);
   return isNaN(d.getTime()) ? null : d;
+}
+
+function localDayKey(date) {
+  return [date.getFullYear(), pad(date.getMonth() + 1), pad(date.getDate())].join('-');
+}
+
+function isOnSelectedDay(notice) {
+  if (notice.status === 'skip' || !['new', 'todo', 'done'].includes(notice.status)) return false;
+  const deadline = parseDeadline(notice.deadline);
+  const date = deadline || (notice.status !== 'new' && notice.createdAt ? new Date(notice.createdAt) : null);
+  return date !== null && localDayKey(date) === localDayKey(app.selectedDay);
+}
+
+function renderDayBar() {
+  const shown = app.mode === 'notice' && app.tab === 'today';
+  $('dayBar').hidden = !shown;
+  if (!shown) return;
+  const isToday = localDayKey(app.selectedDay) === localDayKey(new Date());
+  const date = app.selectedDay.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'short' });
+  $('dayTitle').textContent = (isToday ? '今天 · ' : '') + date;
+  $('todayBtn').hidden = isToday;
+  const items = visibleNotices();
+  const count = items.filter((notice) => notice.status === 'done').length;
+  $('dayProgress').textContent = items.length ? `已完成 ${count}/${items.length} 项` : '';
+}
+
+function shiftDay(offset) {
+  const next = new Date(app.selectedDay);
+  next.setDate(next.getDate() + offset);
+  app.selectedDay = next;
+  render();
 }
 
 function fmtDeadline(s) {
@@ -174,7 +206,12 @@ function renderFunEmpty() {
   const empty = $('empty');
   const list = funItems();
   const groups = app.data?.settings?.funGroups || [];
-  if (!groups.length) {
+  if (app.tab === 'today') {
+    empty.hidden = !gridEmpty;
+    $('emptyTitle').textContent = '这一天还没有日程';
+    $('emptyText').textContent = '可以添加一条日程，或在「全部」查看整理出的通知。';
+    $('emptyAction').textContent = '添加日程';
+  } else if (!groups.length && gridEmpty) {
     empty.hidden = false;
     $('emptyTitle').textContent = '先选几个娱乐群';
     $('emptyText').innerHTML = '游戏群、动漫群、桌游群、吃喝群…<br/>选好了我就帮你看大家在聊什么、有什么局。';
@@ -256,6 +293,7 @@ function isArchived(n) { return n.status === 'skip' || n.status === 'done'; }
 
 function tabCount(id) {
   const list = notices();
+  if (id === 'today') return list.filter(isOnSelectedDay).length;
   if (id === 'all') return list.filter((n) => !isArchived(n)).length;
   if (id === 'todo') return list.filter((n) => n.status === 'todo').length;
   if (id === 'archive') return list.filter(isArchived).length;
@@ -314,6 +352,7 @@ function render() {
   $('nextRun').textContent = app.mode === 'fun' ? funNextRunText() : nextRunText(settings);
   $('runBtn').disabled = app.mode === 'fun' ? Boolean(app.data.fun?.running) : state.running;
   updateRunBar(state);
+  renderDayBar();
   renderModeSwitch();
 
   if (app.mode === 'fun') {
@@ -368,7 +407,8 @@ function updateRunBar(state) {
 
 function renderTabs() {
   const tabs = [
-    { id: 'all', label: '全部', emoji: '🗂' },
+    { id: 'today', label: '今日', emoji: '' },
+    { id: 'all', label: '全部', emoji: '' },
     { id: 'todo', label: '待办', emoji: '⏳' },
     ...CATS.map((c) => ({ id: c, label: c, emoji: CAT_META[c].emoji })),
     { id: 'archive', label: '归档', emoji: '🗃️' },
@@ -376,7 +416,7 @@ function renderTabs() {
   $('tabs').innerHTML = tabs.map((t) => {
     const n = tabCount(t.id);
     return `<button class="tab ${app.tab === t.id ? 'active' : ''}" data-tab="${t.id}">
-      <span>${t.emoji}</span>${t.label}${n ? `<span class="n">${n}</span>` : ''}
+      ${t.emoji ? `<span>${t.emoji}</span>` : ''}${t.label}${n ? `<span class="n">${n}</span>` : ''}
     </button>`;
   }).join('');
 }
@@ -385,6 +425,13 @@ function visibleNotices() {
   const list = notices().slice();
   const statusRank = { new: 0, todo: 1, done: 2, skip: 3 };   // 未处理的新通知排最前
   const dl = (n) => { const d = parseDeadline(n.deadline); return d ? d.getTime() : 9e15; };
+  if (app.tab === 'today') {
+    const order = (n) => /[:：]\d{2}/.test(n.deadline || '') ? dl(n) : Infinity;
+    return list.filter(isOnSelectedDay).sort((a, b) =>
+      Number(a.status === 'done') - Number(b.status === 'done')
+      || order(a) - order(b)
+      || a.title.localeCompare(b.title, 'zh-CN'));
+  }
   if (app.tab === 'all') {
     list.sort((a, b) => {
       const ra = statusRank[a.status] ?? 1;
@@ -421,8 +468,13 @@ function cardHtml(n) {
   const cd = countdownOf(n.deadline);
   const hasDl = Boolean(parseDeadline(n.deadline));
   const archived = isArchived(n);
-  const statusCls = archived ? 'status-archived' : '';
-  const actions = archived
+  const agenda = app.tab === 'today';
+  const done = n.status === 'done';
+  const statusCls = agenda ? (done ? 'status-agenda agenda-done' : 'status-agenda') : archived ? 'status-archived' : '';
+  const check = agenda ? `<button class="card-check" data-act="${done ? 'restore' : 'done'}"
+    aria-pressed="${done}" title="${done ? '标为未完成' : '标为完成'}"
+    aria-label="${done ? '标为未完成' : '标为完成'}：${esc(n.title)}">${done ? '✓' : '○'}</button>` : '';
+  const actions = agenda ? '' : archived
     ? `<button class="act main" data-act="restore">↩ 恢复到列表</button>
        <button class="act warn" data-act="delete">删除</button>`
     : n.status === 'todo'
@@ -431,23 +483,24 @@ function cardHtml(n) {
       : `<button class="act main" data-act="todo">加入待办</button>
          <button class="act warn" data-act="skip">不参加 / 忽略</button>`;
 
-  const footLeft = archived
+  const footLeft = archived && !agenda
     ? `<span class="archive-note">🗃️ ${n.status === 'done' ? '已完成' : '已忽略'} · ${archiveDaysLeft(n)} 天后自动清理</span>`
     : `<span class="deadline ${hasDl ? '' : 'none'}">🕒 ${hasDl ? fmtDeadline(n.deadline) : '没有明确截止时间'}</span>`;
-  const footRight = archived ? '' : `<span class="countdown ${n.status === 'todo' ? 'todo-' + cd.cls : cd.cls}">${cd.text}</span>`;
+  const footRight = archived || agenda ? '' : `<span class="countdown ${n.status === 'todo' ? 'todo-' + cd.cls : cd.cls}">${cd.text}</span>`;
 
-  return `<article class="card cat-${meta.cls} ${statusCls}" data-id="${n.id}" style="animation-delay:${Math.random() * 0.08}s">
+  return `<article class="card cat-${meta.cls} ${statusCls}" data-id="${esc(n.id)}">
     <div class="card-top">
       <span class="badge">${meta.emoji} ${esc(n.category)}</span>
-      <span class="src">${esc(n.group || '来源未知')}</span>
+      <span class="src">${esc(n.group === 'iBetter' ? '轻松打卡' : n.group || '来源未知')}</span>
+      ${check}
     </div>
-    <h3 class="card-title">${esc(n.title)}${n.status === 'todo' ? '<span class="todo-flag">⏳ 待办中</span>' : ''}</h3>
+    <h3 class="card-title"><a href="#" data-open-detail>${esc(n.title)}</a>${!agenda && n.status === 'todo' ? '<span class="todo-flag">待办中</span>' : ''}</h3>
     <p class="summary">${esc(n.summary || n.detail || '')}</p>
     <div class="card-foot">
       ${footLeft}
       ${footRight}
     </div>
-    <div class="card-actions">${actions}</div>
+    ${actions ? `<div class="card-actions">${actions}</div>` : ''}
   </article>`;
 }
 
@@ -456,7 +509,12 @@ function renderEmpty(state) {
   const empty = $('empty');
   const gridEmpty = visibleNotices().length === 0;
   const groups = app.data?.settings?.groups || [];
-  if (!groups.length) {
+  if (app.tab === 'today') {
+    empty.hidden = !gridEmpty;
+    $('emptyTitle').textContent = '这一天还没有日程';
+    $('emptyText').textContent = '可以添加一条日程，或在「全部」查看整理出的通知。';
+    $('emptyAction').textContent = '添加日程';
+  } else if (!groups.length && gridEmpty) {
     empty.hidden = false;
     $('emptyTitle').textContent = '先选几个要整理的群';
     $('emptyText').innerHTML = '微信群那么多，先挑出重要的几个：班群、通知群、兼职群…<br/>我只读这些群，不会乱翻你的聊天。';
@@ -489,9 +547,9 @@ async function restoreNotice(id) {
   const res = await api('/api/notice/restore', { method: 'POST', body: JSON.stringify({ id }) });
   if (!res.ok) { toast('恢复失败'); return; }
   const n = notices().find((x) => x.id === id);
-  if (n) { n.status = res.notice.status; delete n.archivedAt; delete n.prevStatus; }
+  if (n) { Object.assign(n, res.notice); delete n.archivedAt; delete n.prevStatus; }
   render();
-  toast('已恢复到列表');
+  toast(app.tab === 'today' ? '已标为未完成' : '已恢复到列表');
 }
 
 async function deleteNotice(id) {
@@ -507,15 +565,24 @@ async function deleteNotice(id) {
 }
 
 async function setStatus(id, status) {
-  const n = notices().find((x) => x.id === id);
-  if (!n) return;
-  n.status = status;
-  render();
-  const res = await api('/api/notice', { method: 'POST', body: JSON.stringify({ id, status }) });
-  if (!res.ok) { toast('保存失败'); load(); return; }
-  if (status === 'todo') toast(parseDeadline(n.deadline) ? '已加入待办，倒计时开始 ⏳' : '已加入待办 ✓');
+  try {
+    const res = await api('/api/notice', { method: 'POST', body: JSON.stringify({ id, status }) });
+    if (!res.ok) throw new Error(res.error);
+    const notice = notices().find((x) => x.id === id);
+    if (notice) {
+      Object.assign(notice, res.notice);
+      if (!res.notice.archivedAt) delete notice.archivedAt;
+      if (!res.notice.prevStatus) delete notice.prevStatus;
+    }
+    render();
+    if (status === 'todo') toast(parseDeadline(res.notice.deadline) ? '已加入待办，倒计时开始 ⏳' : '已加入待办 ✓');
+  } catch (error) {
+    toast(error.message || '保存失败');
+    load({ quiet: true });
+    return;
+  }
   if (status === 'skip') toast('已归档，7 天后自动清理');
-  if (status === 'done') toast('完成一件 🎉 已归档，7 天后自动清理');
+  if (status === 'done') toast('已完成');
   if (status === 'new') toast('已移回通知');
 }
 
@@ -604,7 +671,7 @@ function renderDetail() {
       <div>
         <div class="d-meta">
           <span class="badge cat-${meta.cls}">${meta.emoji} ${esc(n.category)}</span>
-          <span class="d-src">来自「${esc(n.group || '未知群')}」</span>
+          <span class="d-src">来自「${esc(n.group === 'iBetter' ? '轻松打卡' : n.group || '未知群')}」</span>
         </div>
         <h2 class="d-title">${esc(n.title)}</h2>
       </div>
@@ -831,10 +898,10 @@ function renderSettings() {
     </div>
 
     <div class="s-block">
-      <div class="s-title">🔄 检查更新</div>
-      <div class="s-desc">当前版本 <strong>${esc(app.data.env?.version || '—')}</strong>。从 GitHub 仓库读取最新版本；只提示，不会自动覆盖你的代码和 data 数据。</div>
+      <div class="s-title">应用更新</div>
+      <div class="s-desc">当前版本 <strong>${esc(app.data.env?.version || '—')}</strong></div>
+      <label class="inline-toggle"><input type="checkbox" id="autoCheckUpdate" /> 启动时检查更新</label>
       <button class="btn ghost" id="checkUpdateBtn" style="margin-top:8px">检查更新</button>
-      <div class="dl-hint" id="updateResult" style="margin-top:8px"></div>
     </div>
 
     <div class="s-block">
@@ -942,23 +1009,7 @@ function bindSettings() {
     if (cnt) cnt.textContent = `已选 ${d.groups.length} 个`;
   });
   const checkBtn = $('checkUpdateBtn');
-  if (checkBtn) {
-    checkBtn.onclick = async () => {
-      const box = $('updateResult');
-      box.textContent = '正在检查…';
-      const r = await api('/api/update/check', { method: 'POST' });
-      if (!r.ok) { box.textContent = r.error || '检查失败'; return; }
-      if (!r.hasUpdate) { box.textContent = `已是最新版本（${r.current}）`; return; }
-      box.innerHTML = `发现新版本 <strong>${esc(r.latest)}</strong>（当前 ${esc(r.current)}）<br/>${esc(r.notes || '')}`;
-      const go = document.createElement('button');
-      go.className = 'btn primary';
-      go.textContent = '打开 GitHub';
-      go.style.marginTop = '8px';
-      go.onclick = () => api('/api/open', { method: 'POST', body: JSON.stringify({ url: r.url }) });
-      box.appendChild(document.createElement('br'));
-      box.appendChild(go);
-    };
-  }
+  bindUpdateSettings(checkBtn, $('autoCheckUpdate'));
 
   $('saveSettings').onclick = async () => {
     const body = {
@@ -1017,8 +1068,13 @@ $('tabs').addEventListener('click', (e) => {
   if (!btn) return;
   if (btn.dataset.funtab) { app.funTab = btn.dataset.funtab; render(); return; }
   app.tab = btn.dataset.tab;
+  if (app.tab === 'today') app.selectedDay = new Date();
   render();
 });
+
+$('prevDay').onclick = () => shiftDay(-1);
+$('nextDay').onclick = () => shiftDay(1);
+$('todayBtn').onclick = () => { app.selectedDay = new Date(); render(); };
 
 $('modeSwitch').addEventListener('click', (e) => {
   const b = e.target.closest('[data-mode]');
@@ -1043,6 +1099,7 @@ $('grid').addEventListener('click', (e) => {
     else setStatus(card.dataset.id, a);
     return;
   }
+  if (e.target.closest('[data-open-detail]')) e.preventDefault();
   openDetail(card.dataset.id);
 });
 
@@ -1052,7 +1109,7 @@ $('drawer').addEventListener('click', (e) => {
     const a = act.dataset.dact;
     if (a === 'restore') restoreNotice(app.selectedId);
     else if (a === 'delete') deleteNotice(app.selectedId);
-    else { setStatus(app.selectedId, a); renderDetail(); }
+    else setStatus(app.selectedId, a);
   }
 });
 
@@ -1086,6 +1143,7 @@ $('annOk').onclick = closeAnnouncements;
 $('closeSettings').onclick = closeSettings;
 $('clearArchiveBtn').onclick = clearArchive;
 $('emptyAction').onclick = () => {
+  if (app.mode === 'notice' && app.tab === 'today') { $('addBtn').click(); return; }
   if (app.mode === 'fun') {
     if (!(app.data?.settings?.funGroups || []).length) openSettings();
     else $('runBtn').click();

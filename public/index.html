@@ -4,31 +4,28 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>轻松日程</title>
+<link rel="icon" href="/schedule-icon.png" />
 <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-<div class="blob blob-a"></div>
-<div class="blob blob-b"></div>
-
 <header class="topbar">
   <div class="brand">
-    <div class="logo">🌤️</div>
+    <img class="logo" src="/schedule-icon.png" width="48" height="48" alt="" />
     <div class="brand-text">
       <h1>轻松日程</h1>
-      <p>把群消息，变成看得懂的待办</p>
     </div>
   </div>
   <div class="mode-switch" id="modeSwitch">
-    <button data-mode="notice" class="on">📋 通知</button>
-    <button data-mode="fun">🎮 娱乐</button>
+    <button data-mode="notice" class="on">日程</button>
+    <button data-mode="fun">娱乐</button>
   </div>
   <div class="top-actions">
     <div class="next-run" id="nextRun">—</div>
-    <button class="btn primary" id="runBtn"><span class="spark">✦</span> 立即整理</button>
-    <button class="btn ghost" id="addBtn" title="手动添加待办">＋ 手动添加</button>
-    <a class="btn ghost" id="bridgeBtn" href="/bridge.html" title="连接手机上的 iBetter">📱</a>
-    <button class="btn ghost" id="annBtn" title="使用公告">📢<span class="dot" id="annDot" hidden></span></button>
-    <button class="btn ghost" id="settingsBtn" title="设置">⚙️</button>
+    <button class="btn primary" id="runBtn">立即整理</button>
+    <button class="btn ghost" id="addBtn" title="手动添加待办">＋ 添加日程</button>
+    <a class="btn ghost" id="bridgeBtn" href="/bridge.html" title="连接轻松打卡">连接</a>
+    <button class="btn ghost" id="annBtn" title="使用公告">公告<span class="dot" id="annDot" hidden></span></button>
+    <button class="btn ghost" id="settingsBtn" title="更多设置">更多</button>
   </div>
 </header>
 
@@ -42,7 +39,15 @@
 
 <div class="toastbar" id="toast" hidden></div>
 
-<nav class="tabs" id="tabs"></nav>
+<nav class="tabs" id="tabs" aria-label="日程分类"></nav>
+
+<section class="day-bar" id="dayBar" aria-label="选择日期" hidden>
+  <button class="btn ghost" type="button" id="prevDay" aria-label="前一天">‹</button>
+  <h2 id="dayTitle"></h2>
+  <button class="btn ghost" type="button" id="nextDay" aria-label="后一天">›</button>
+  <button class="btn ghost" type="button" id="todayBtn">回到今天</button>
+  <p id="dayProgress"></p>
+</section>
 
 <div class="archive-bar" id="archiveBar" hidden>
   <span id="archiveBarText">—</span>
@@ -64,7 +69,7 @@
 
 <aside class="drawer settings" id="settingsDrawer" hidden>
   <div class="drawer-head">
-    <h2>设置</h2>
+    <h2>更多</h2>
     <button class="close" id="closeSettings">×</button>
   </div>
   <div class="drawer-body" id="settingsBody"></div>
@@ -76,27 +81,35 @@
 
 <aside class="drawer settings" id="addDrawer" hidden>
   <div class="drawer-head">
-    <h2>手动添加待办</h2>
-    <button class="close" id="closeAdd">×</button>
+    <h2>添加日程</h2>
+    <button class="close" id="closeAdd" aria-label="关闭添加日程">×</button>
   </div>
   <div class="drawer-body">
-    <div class="s-block">
-      <div class="s-title">📋 把内容粘进来</div>
-      <div class="s-desc">从微信复制的一段通知、或者自己随手记的一句话都行。WorkBuddy 会帮你拆成事项、写好标题和截止时间，并<strong>直接放进「待办」栏</strong>。</div>
-      <textarea id="addText" class="s-input" placeholder="例如：下周三前把设计表达作业交到接龙管家，顺便买两张 A3 纸…" style="width:100%;height:170px;resize:vertical;padding:12px;line-height:1.6"></textarea>
+    <div class="seg" id="addMode" aria-label="添加方式">
+      <button class="on" type="button" data-add-mode="direct">直接添加</button>
+      <button type="button" data-add-mode="paste">粘贴整理</button>
     </div>
-    <div class="s-block">
-      <div class="s-title">🏷️ 来源（可不填）</div>
-      <div class="s-desc">填个群名或备注，卡片上会标出来；留空就写「手动添加」。</div>
-      <input class="s-input" id="addSource" placeholder="例如：班群 / 自己记的" style="width:100%" />
-    </div>
-    <div class="s-block">
-      <div class="s-title">⏱️ 什么时候整理好</div>
-      <div class="s-desc">点「交给 WorkBuddy 整理」后当场就整理完，卡片会直接出现在「待办」栏，不用等、也不用再来对话里催。<br/>首次使用需先在终端完成一次 WorkBuddy 命令行登录。</div>
+    <form id="directAgenda" class="agenda-form">
+      <label>标题<input class="s-input" id="agendaTitle" required maxlength="60" /></label>
+      <div class="agenda-form-row">
+        <label>日期<input class="s-input" id="agendaDate" type="date" required /></label>
+        <label>时间（可选）<input class="s-input" id="agendaTime" type="time" /></label>
+      </div>
+      <label>备注<textarea class="s-input" id="agendaNote" rows="3" maxlength="500"></textarea></label>
+    </form>
+    <div id="pasteAgenda" hidden>
+      <div class="s-block">
+        <label class="s-title" for="addText">通知内容</label>
+        <textarea id="addText" class="s-input" placeholder="例如：下周三前交设计作业，带两张 A3 纸。" rows="6" maxlength="20000"></textarea>
+      </div>
+      <div class="s-block">
+        <label class="s-title" for="addSource">来源（可选）</label>
+        <input class="s-input" id="addSource" placeholder="例如：班群" maxlength="80" />
+      </div>
     </div>
   </div>
   <div class="s-foot-fixed">
-    <button class="btn primary" id="submitAdd" style="flex:1">交给 WorkBuddy 整理</button>
+    <button class="btn primary" id="submitAdd" style="flex:1">保存日程</button>
     <button class="btn ghost" id="cancelAdd">取消</button>
   </div>
 </aside>
@@ -112,7 +125,18 @@
   </div>
 </aside>
 
+<dialog id="updateDialog" class="update-dialog" aria-labelledby="updateTitle">
+  <h2 id="updateTitle">应用更新</h2>
+  <p id="updateStatus" role="status" aria-live="polite"></p>
+  <p id="updateNotes"></p>
+  <div class="update-actions">
+    <button class="btn ghost" id="dismissUpdate" type="button">稍后</button>
+    <button class="btn primary" id="installUpdate" type="button" hidden>立即更新</button>
+    <a class="btn primary" id="downloadUpdate" target="_blank" rel="noopener noreferrer" hidden>前往下载</a>
+  </div>
+</dialog>
 <script src="/app.js"></script>
 <script src="/add.js"></script>
+<script src="/update.js"></script>
 </body>
 </html>
