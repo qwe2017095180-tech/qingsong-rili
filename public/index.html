@@ -9,23 +9,16 @@
 </head>
 <body>
 <header class="topbar">
-  <div class="brand">
-    <img class="logo" src="/schedule-icon.png" width="48" height="48" alt="" />
-    <div class="brand-text">
-      <h1>轻松日程</h1>
-    </div>
-  </div>
-  <div class="mode-switch" id="modeSwitch">
-    <button data-mode="notice" class="on">日程</button>
-    <button data-mode="fun">娱乐</button>
+  <div class="app-heading">
+    <button class="header-pill" id="todayBtn" type="button" aria-label="回到今天" title="回到今天">◷</button>
+    <h1>轻松日程</h1>
+    <button class="header-pill" id="addBtn" type="button" aria-label="添加日程" title="添加日程">＋</button>
   </div>
   <div class="top-actions">
     <div class="next-run" id="nextRun">—</div>
     <button class="btn primary" id="runBtn">立即整理</button>
-    <button class="btn ghost" id="addBtn" title="手动添加待办">＋ 添加日程</button>
     <a class="btn ghost" id="bridgeBtn" href="/bridge.html" title="连接轻松打卡">连接</a>
     <button class="btn ghost" id="annBtn" title="使用公告">公告<span class="dot" id="annDot" hidden></span></button>
-    <button class="btn ghost" id="settingsBtn" title="更多设置">更多</button>
   </div>
 </header>
 
@@ -42,11 +35,20 @@
 <nav class="tabs" id="tabs" aria-label="日程分类"></nav>
 
 <section class="day-bar" id="dayBar" aria-label="选择日期" hidden>
-  <button class="btn ghost" type="button" id="prevDay" aria-label="前一天">‹</button>
-  <h2 id="dayTitle"></h2>
-  <button class="btn ghost" type="button" id="nextDay" aria-label="后一天">›</button>
-  <button class="btn ghost" type="button" id="todayBtn">回到今天</button>
-  <p id="dayProgress"></p>
+  <div class="calendar-toolbar">
+    <button class="header-pill calendar-arrow" type="button" id="prevDay" aria-label="上一周">‹</button>
+    <h2 id="dayTitle"></h2>
+    <button class="header-pill calendar-arrow" type="button" id="nextDay" aria-label="下一周">›</button>
+  </div>
+  <div class="weekdays" aria-hidden="true">
+    <span>周日</span><span>周一</span><span>周二</span><span>周三</span><span>周四</span><span>周五</span><span>周六</span>
+  </div>
+  <div class="calendar-days" id="calendarDays"></div>
+  <div class="agenda-heading">
+    <h2 id="agendaTitleHeading">今日日程</h2>
+    <p id="dayProgress" aria-live="polite"></p>
+    <button class="btn ghost calendar-toggle" id="calendarToggle" type="button" aria-expanded="false">展开日历</button>
+  </div>
 </section>
 
 <div class="archive-bar" id="archiveBar" hidden>
@@ -62,6 +64,15 @@
   <p id="emptyText">先去设置里挑几个群，然后点「立即整理」，<br/>我会把里面的作业、兼职、比赛、活动都捞出来。</p>
   <button class="btn primary" id="emptyAction">去选择群</button>
 </section>
+
+<nav class="app-navigation" id="modeSwitch" aria-label="主导航">
+  <div class="app-navigation-inner">
+    <button type="button" data-mode="notice" data-view="today" class="on" aria-current="page"><span class="nav-date" id="navDate" aria-hidden="true"></span>今日</button>
+    <button type="button" data-mode="notice" data-view="all"><span aria-hidden="true">☷</span>日程</button>
+    <button type="button" data-mode="fun"><span aria-hidden="true">☆</span>娱乐</button>
+    <button type="button" id="settingsBtn"><span aria-hidden="true">···</span>更多</button>
+  </div>
+</nav>
 
 <div class="mask" id="mask" hidden></div>
 
