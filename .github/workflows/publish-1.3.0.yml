@@ -1,0 +1,30 @@
+name: Publish 轻松日程 1.3.0
+on:
+  push:
+    branches: [release/qingsong-rili-1.3.0]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: v1.3.0
+      RELEASE_COMMIT: b894e88a5a959fed1035b6f4a0a2f675e894d5b4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: b894e88a5a959fed1035b6f4a0a2f675e894d5b4
+          persist-credentials: false
+      - name: Verify and package source
+        run: |
+          node --test test/update.test.mjs
+          node -e 'if ("v" + require("./version.json").version !== process.env.RELEASE_TAG) process.exit(1)'
+          git archive --format=zip --prefix=qingsong-rili-1.3.0/ -o qingsong-rili-1.3.0.zip HEAD
+      - name: Publish stable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$RELEASE_TAG" qingsong-rili-1.3.0.zip \
+            --repo "$GITHUB_REPOSITORY" --target "$RELEASE_COMMIT" \
+            --title "轻松日程 $RELEASE_TAG" \
+            --notes "统一轻松打卡与轻松日程的视觉和完成操作，新增按日查看、直接添加日程和应用内更新。Git 安装版可在更多中检查下一个稳定版本。"
