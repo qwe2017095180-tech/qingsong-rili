@@ -186,7 +186,7 @@ function createWindow(url) {
     minHeight: 640,
     title: '轻松日程',
     icon: ICON,
-    backgroundColor: '#f9faf5',
+    backgroundColor: '#f3f5fc',
     autoHideMenuBar: true,
     show: false,
     webPreferences: {

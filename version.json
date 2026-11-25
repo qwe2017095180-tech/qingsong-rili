@@ -1,7 +1,7 @@
 {
-  "version": "1.1.2",
-  "releasedAt": "2026-11-12",
-  "notes": "整理通道改为优先使用自己配置的 AI 接口，没填 Key 才回退到本机 WorkBuddy 命令行；进度提示统一为「正在整理…」；公告里的网址可点击打开。",
+  "version": "1.3.0",
+  "releasedAt": "2026-11-25",
+  "notes": "统一轻松打卡和轻松日程的图标、卡片与完成操作，新增按日查看、直接添加日程和应用内更新。",
   "repo": "qwe2017095180-tech/qingsong-rili",
-  "download": "https://github.com/qwe2017095180-tech/qingsong-rili"
+  "download": "https://github.com/qwe2017095180-tech/qingsong-rili/releases/latest"
 }

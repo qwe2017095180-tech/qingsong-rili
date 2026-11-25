@@ -11,6 +11,8 @@ import { listChats, readChat, messagesToText, wechatReady } from './lib/wechat.m
 import { organizeWithModel, backendStatus, pickBackend } from './lib/workbuddy-model.mjs';
 import { summarizeFun } from './lib/fun-summary.mjs';
 import { pending, recent, complete } from './lib/queue.mjs';
+import { initBridge, bridgeInfo, setBridgeEnabled, resetToken, createAgendaNotices } from './lib/bridge.mjs';
+import { createUpdater } from './lib/update.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, 'public');
@@ -42,17 +44,8 @@ function readVersion() {
   }
 }
 
-/** 比较 x.y.z；a 比 b 新返回 1，旧返回 -1，相同返回 0 */
-function compareVersion(a, b) {
-  const pa = String(a).split('.').map((x) => Number(x) || 0);
-  const pb = String(b).split('.').map((x) => Number(x) || 0);
-  for (let i = 0; i < 3; i++) {
-    const x = pa[i] || 0;
-    const y = pb[i] || 0;
-    if (x !== y) return x > y ? 1 : -1;
-  }
-  return 0;
-}
+const runningVersion = readVersion().version;
+const updater = createUpdater(__dirname, runningVersion);
 
 /** 跨平台打开浏览器：macOS 用 open，Windows 用 start，Linux 用 xdg-open */
 function openUrl(url) {
@@ -318,39 +311,35 @@ const server = http.createServer(async (req, res) => {
             apiConfigured: b.apiConfigured,
             deepseekConfigured: b.deepseekConfigured,
             platform: b.platform,
-            version: readVersion().version,
+            version: runningVersion,
           };
         })(),
       });
     }
 
-    // 检查 GitHub 上的新版本：读仓库根目录的 version.json
     if (p === '/api/update/check' && req.method === 'POST') {
-      const local = readVersion();
-      const repo = String(local.repo || process.env.GITHUB_REPO || '').trim();
-      if (!repo) {
-        return send(res, 200, { ok: false, error: '还没有配置 GitHub 仓库（version.json 的 repo 字段）' });
-      }
       try {
-        // 用 api.github.com 读文件内容：部分网络环境访问不了 raw.githubusercontent.com
-        const r = await fetch(`https://api.github.com/repos/${repo}/contents/version.json`, {
-          headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'qingsong-rili' },
-          signal: AbortSignal.timeout(10_000),
-        });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const body = await r.json();
-        const remote = JSON.parse(Buffer.from(body.content || '', 'base64').toString('utf8'));
-        return send(res, 200, {
-          ok: true,
-          current: local.version,
-          latest: remote.version,
-          hasUpdate: compareVersion(remote.version, local.version) > 0,
-          notes: remote.notes || '',
-          releasedAt: remote.releasedAt || '',
-          url: remote.download || `https://github.com/${repo}/releases/latest`,
-        });
+        return send(res, 200, { ok: true, ...await updater.check() });
       } catch (e) {
-        return send(res, 200, { ok: false, error: `检查更新失败：${e.message}` });
+        return send(res, 502, { ok: false, error: `检查更新失败：${e.message}` });
+      }
+    }
+
+    if (p === '/api/update/install' && req.method === 'POST') {
+      const origin = req.headers.origin;
+      const port = req.socket.localPort;
+      if (![`http://127.0.0.1:${port}`, `http://localhost:${port}`].includes(origin)
+        || req.headers['content-type']?.split(';')[0] !== 'application/json') {
+        return send(res, 403, { ok: false, error: '请从轻松日程中安装更新' });
+      }
+      if (state.running || state.funRunning) {
+        return send(res, 409, { ok: false, error: '请等待当前整理结束后再安装' });
+      }
+      const { tag } = await readBody(req);
+      try {
+        return send(res, 200, { ok: true, ...await updater.install(tag) });
+      } catch (e) {
+        return send(res, 409, { ok: false, error: e.message });
       }
     }
 
@@ -405,6 +394,16 @@ const server = http.createServer(async (req, res) => {
       state.error = null;
       runOrganize({ trigger: 'manual' });     // 后台跑，前端轮询状态
       return send(res, 200, { ok: true });
+    }
+
+    if (p === '/api/agenda' && req.method === 'POST') {
+      const body = await readBody(req);
+      const { results, errors } = createAgendaNotices([body], {
+        group: '手动添加',
+        runId: 'manual-agenda',
+      });
+      if (errors.length) return send(res, 400, { ok: false, error: errors[0].error });
+      return send(res, 200, { ok: true, id: results[0].id });
     }
 
     // 手动添加：粘贴的文本当场交给 WorkBuddy 整理成待办，不排队、不用本地规则兜底
@@ -529,6 +528,19 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: true, removed, remaining: store.notices.length });
     }
 
+    // iBetter 连接（只在本机 127.0.0.1 页面服务上可调，用于 bridge.html 配对页）
+    if (p === '/api/bridge/info' && req.method === 'GET') {
+      return send(res, 200, { ok: true, ...bridgeInfo() });
+    }
+    if (p === '/api/bridge/enable' && req.method === 'POST') {
+      const body = await readBody(req);
+      return send(res, 200, { ok: true, ...(await setBridgeEnabled(Boolean(body.enabled))) });
+    }
+    if (p === '/api/bridge/reset' && req.method === 'POST') {
+      resetToken();
+      return send(res, 200, { ok: true, ...bridgeInfo() });
+    }
+
     if (p === '/api/open' && req.method === 'POST') {
       const body = await readBody(req);
       const target = String(body.url || '');
@@ -569,6 +581,7 @@ function listen(port, attempt = 0) {
     if (process.env.NO_OPEN !== '1') openUrl(url);
     setInterval(tick, 20_000);
     tick();
+    initBridge().catch((e) => console.error('[轻松打卡连接]', e.message));
   });
 }
 
