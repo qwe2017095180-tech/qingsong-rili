@@ -1,7 +1,7 @@
 {
-  "version": "1.1.1",
-  "releasedAt": "2026-11-11",
-  "notes": "公告里的网址改为可点击链接，点击用系统浏览器打开；新增桌面版与应用内公告；群列表改为按最近活跃排序、只显示群聊与好友；修复群名含 emoji 时群列表读取失败。",
+  "version": "1.2.0",
+  "releasedAt": "2026-11-25",
+  "notes": "新增「连接 iBetter」局域网同步（7790 端口 + 配对码），支持与手机 iBetter 双向同步今日日程与待办；新增微信 FTS 全文库补全读取，避免新分库未抓密钥时漏消息；优化新通知排序与整理完成提示。",
   "repo": "qwe2017095180-tech/qingsong-rili",
   "download": "https://github.com/qwe2017095180-tech/qingsong-rili"
 }

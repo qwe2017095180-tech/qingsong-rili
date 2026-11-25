@@ -11,6 +11,7 @@ import { listChats, readChat, messagesToText, wechatReady } from './lib/wechat.m
 import { organizeWithModel, backendStatus } from './lib/workbuddy-model.mjs';
 import { summarizeFun } from './lib/fun-summary.mjs';
 import { pending, recent, complete } from './lib/queue.mjs';
+import { initBridge, bridgeInfo, setBridgeEnabled, resetToken } from './lib/bridge.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, 'public');
@@ -525,6 +526,19 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: true, removed, remaining: store.notices.length });
     }
 
+    // iBetter 连接（只在本机 127.0.0.1 页面服务上可调，用于 bridge.html 配对页）
+    if (p === '/api/bridge/info' && req.method === 'GET') {
+      return send(res, 200, { ok: true, ...bridgeInfo() });
+    }
+    if (p === '/api/bridge/enable' && req.method === 'POST') {
+      const body = await readBody(req);
+      return send(res, 200, { ok: true, ...(await setBridgeEnabled(Boolean(body.enabled))) });
+    }
+    if (p === '/api/bridge/reset' && req.method === 'POST') {
+      resetToken();
+      return send(res, 200, { ok: true, ...bridgeInfo() });
+    }
+
     if (p === '/api/open' && req.method === 'POST') {
       const body = await readBody(req);
       const target = String(body.url || '');
@@ -565,6 +579,7 @@ function listen(port, attempt = 0) {
     if (process.env.NO_OPEN !== '1') openUrl(url);
     setInterval(tick, 20_000);
     tick();
+    initBridge().catch((e) => console.error('[iBetter 连接]', e.message));
   });
 }
 

@@ -201,13 +201,19 @@ async function api(path, opts = {}) {
 }
 
 let prevRunning = false;
+let lastSeenRunId = null;   // 已提示过的整理批次；首次加载只记录不提示
 
 function afterRun(data) {
-  const was = prevRunning;
-  prevRunning = Boolean(data.state?.running);
-  if (!was || data.state?.running) return;
+  const running = Boolean(data.state?.running);
+  prevRunning = running;
+  if (running) return;
   const r = data.state?.lastResult;
-  if (!r) return;
+  if (!r || !r.runId) return;
+  // 首次加载：把当前结果记为已读，避免一进页面就弹上一次的提示
+  if (lastSeenRunId === null) { lastSeenRunId = r.runId; return; }
+  // 同一批次不重复提示（含页面自己触发的、定时触发的、外部触发的）
+  if (r.runId === lastSeenRunId) return;
+  lastSeenRunId = r.runId;
   if (r.engine === 'none') {
     toast(r.note || '整理完成，这段时间没有新内容');
     return;
@@ -377,10 +383,17 @@ function renderTabs() {
 
 function visibleNotices() {
   const list = notices().slice();
-  const statusRank = { todo: 0, new: 1, done: 2, skip: 3 };
+  const statusRank = { new: 0, todo: 1, done: 2, skip: 3 };   // 未处理的新通知排最前
   const dl = (n) => { const d = parseDeadline(n.deadline); return d ? d.getTime() : 9e15; };
   if (app.tab === 'all') {
-    list.sort((a, b) => (statusRank[a.status] - statusRank[b.status]) || (dl(a) - dl(b)));
+    list.sort((a, b) => {
+      const ra = statusRank[a.status] ?? 1;
+      const rb = statusRank[b.status] ?? 1;
+      if (ra !== rb) return ra - rb;
+      // 新通知没有截止时间，按收录时间倒序，刚整理出来的排最上面
+      if (a.status === 'new' && b.status === 'new') return (b.createdAt || 0) - (a.createdAt || 0);
+      return dl(a) - dl(b);
+    });
   } else if (app.tab === 'todo') {
     list.sort((a, b) => dl(a) - dl(b));
   } else if (app.tab === 'archive') {
