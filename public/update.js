@@ -7,14 +7,17 @@ const downloadUpdate = $('downloadUpdate');
 const dismissUpdate = $('dismissUpdate');
 let checkingUpdate = false;
 let installingUpdate = false;
+let lastReleaseUrl = 'https://github.com/qwe2017095180-tech/qingsong-rili/releases/latest';
 
-function showUpdateStatus(message) {
+function showUpdateStatus(message, { isError = false } = {}) {
   updateStatus.textContent = message;
+  updateStatus.classList.toggle('update-error', isError);
   if (!updateDialog.open) updateDialog.showModal();
 }
 
 function reportInstalledUpdate(version) {
   installUpdate.hidden = true;
+  downloadUpdate.hidden = true;
   dismissUpdate.textContent = '关闭';
   showUpdateStatus(`已安装 v${version}。请退出后重新打开轻松日程。`);
 }
@@ -31,6 +34,7 @@ async function checkForAppUpdate({ silent = false } = {}) {
   if (checkingUpdate || installingUpdate || (silent && updateDialog.open)) return;
   checkingUpdate = true;
   installUpdate.hidden = true;
+  installUpdate.textContent = '立即更新';
   downloadUpdate.hidden = true;
   updateNotes.textContent = '';
   dismissUpdate.textContent = '关闭';
@@ -51,18 +55,27 @@ async function checkForAppUpdate({ silent = false } = {}) {
       }
       return;
     }
+    if (result.url) lastReleaseUrl = result.url;
     updateNotes.textContent = result.notes;
     dismissUpdate.textContent = '稍后';
     showUpdateStatus(`发现 v${result.latest}，当前为 v${result.current}`);
     if (result.canInstall) {
       installUpdate.hidden = false;
+      installUpdate.textContent = '立即更新';
       installUpdate.onclick = () => installAppUpdate(result.tag);
     } else {
       downloadUpdate.href = result.url;
       downloadUpdate.hidden = false;
     }
   } catch (error) {
-    if (!silent) showUpdateStatus(error.message || '检查更新失败');
+    if (!silent) {
+      showUpdateStatus(error.message || '检查更新失败', { isError: true });
+      installUpdate.hidden = false;
+      installUpdate.textContent = '重试';
+      installUpdate.onclick = () => checkForAppUpdate();
+      downloadUpdate.href = lastReleaseUrl;
+      downloadUpdate.hidden = false;
+    }
   } finally {
     checkingUpdate = false;
   }
@@ -73,13 +86,19 @@ async function installAppUpdate(tag) {
   installingUpdate = true;
   installUpdate.disabled = true;
   dismissUpdate.disabled = true;
-  showUpdateStatus('正在下载并安装…');
+  downloadUpdate.hidden = true;
+  showUpdateStatus('正在下载并安装（如直连中断会自动切换镜像重试）…');
   try {
     const result = await api('/api/update/install', { method: 'POST', body: JSON.stringify({ tag }) });
     if (!result.ok) throw new Error(result.error || '安装更新失败');
     reportInstalledUpdate(result.latest);
   } catch (error) {
-    showUpdateStatus(error.message || '安装更新失败');
+    showUpdateStatus(error.message || '安装更新失败', { isError: true });
+    installUpdate.hidden = false;
+    installUpdate.textContent = '重试';
+    installUpdate.onclick = () => installAppUpdate(tag);
+    downloadUpdate.href = lastReleaseUrl;
+    downloadUpdate.hidden = false;
   } finally {
     installingUpdate = false;
     installUpdate.disabled = false;

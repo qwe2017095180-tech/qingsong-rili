@@ -1089,8 +1089,12 @@ input[type="time"]:focus, .s-input:focus, .s-select:focus { border-color: #bfe6d
 }
 .update-dialog::backdrop { background: #22222255; }
 .update-dialog h2 { font-size: 20px; margin: 0 0 12px; }
+#updateStatus { overflow-wrap: anywhere; max-height: 22vh; overflow: auto; line-height: 1.5; }
+#updateStatus.update-error { color: #d9382e; background: #fff1f0; padding: 10px 12px; border-radius: 10px; }
 #updateNotes { white-space: pre-wrap; color: var(--ink-soft); max-height: 32vh; overflow: auto; }
-.update-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.update-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.mirror-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.mirror-chip { padding: 4px 10px; font-size: 12px; }
 .inline-toggle { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
 .inline-toggle input { accent-color: var(--primary); }
 

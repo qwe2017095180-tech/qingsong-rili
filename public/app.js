@@ -940,7 +940,17 @@ function renderSettings() {
       <div class="s-title">应用更新</div>
       <div class="s-desc">当前版本 <strong>${esc(app.data.env?.version || '—')}</strong></div>
       <label class="inline-toggle"><input type="checkbox" id="autoCheckUpdate" /> 启动时检查更新</label>
-      <button class="btn ghost" id="checkUpdateBtn" style="margin-top:8px">检查更新</button>
+      <div style="margin-top:10px">
+        <div class="s-desc" style="margin-bottom:6px">下载加速镜像（留空直连，失败自动切换备用镜像）</div>
+        <input class="s-input" id="updateMirror" placeholder="留空表示直连，例如 https://gh-proxy.com/" value="${esc(d.updateMirror || '')}" />
+        <div class="mirror-chips" id="updateMirrorChips">
+          <button type="button" class="btn ghost mirror-chip" data-mirror="">直连 GitHub</button>
+          <button type="button" class="btn ghost mirror-chip" data-mirror="https://gh-proxy.com/">gh-proxy.com</button>
+          <button type="button" class="btn ghost mirror-chip" data-mirror="https://ghfast.top/">ghfast.top</button>
+          <button type="button" class="btn ghost mirror-chip" data-mirror="https://gh-proxy.org/">gh-proxy.org</button>
+        </div>
+      </div>
+      <button class="btn ghost" id="checkUpdateBtn" style="margin-top:10px">检查更新</button>
     </div>
 
     <div class="s-block">
@@ -1049,6 +1059,14 @@ function bindSettings() {
   });
   const checkBtn = $('checkUpdateBtn');
   bindUpdateSettings(checkBtn, $('autoCheckUpdate'));
+  const mirrorChips = $('updateMirrorChips');
+  if (mirrorChips) {
+    mirrorChips.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-mirror]');
+      if (!btn) return;
+      $('updateMirror').value = btn.dataset.mirror;
+    });
+  }
 
   $('saveSettings').onclick = async () => {
     const body = {
@@ -1064,6 +1082,7 @@ function bindSettings() {
       apiBaseUrl: $('apiBaseUrl').value.trim(),
       apiKey: $('apiKey').value.trim(),
       apiModel: $('apiModel').value.trim(),
+      updateMirror: $('updateMirror')?.value.trim() || '',
     };
     const res = await api('/api/settings', { method: 'POST', body: JSON.stringify(body) });
     if (res.ok) {

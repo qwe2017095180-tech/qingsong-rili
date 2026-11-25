@@ -12,7 +12,7 @@ import { organizeWithModel, backendStatus } from './lib/workbuddy-model.mjs';
 import { summarizeFun } from './lib/fun-summary.mjs';
 import { pending, recent, complete } from './lib/queue.mjs';
 import { initBridge, bridgeInfo, setBridgeEnabled, resetToken, createAgendaNotices } from './lib/bridge.mjs';
-import { createUpdater } from './lib/update.mjs';
+import { createUpdater, normalizeMirrorPrefix } from './lib/update.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, 'public');
@@ -45,7 +45,9 @@ function readVersion() {
 }
 
 const runningVersion = readVersion().version;
-const updater = createUpdater(__dirname, runningVersion);
+const updater = createUpdater(__dirname, runningVersion, fetch, {
+  getMirror: () => store.settings.updateMirror || '',
+});
 
 /** 跨平台打开浏览器：macOS 用 open，Windows 用 start，Linux 用 xdg-open */
 function openUrl(url) {
@@ -331,9 +333,9 @@ const server = http.createServer(async (req, res) => {
       if (state.running || state.funRunning) {
         return send(res, 409, { ok: false, error: '请等待当前整理结束后再安装' });
       }
-      const { tag } = await readBody(req);
+      const { tag, mirror } = await readBody(req);
       try {
-        return send(res, 200, { ok: true, ...await updater.install(tag) });
+        return send(res, 200, { ok: true, ...await updater.install(tag, { mirror }) });
       } catch (e) {
         return send(res, 409, { ok: false, error: e.message });
       }
@@ -369,6 +371,9 @@ const server = http.createServer(async (req, res) => {
       if (typeof body.deepseekBaseUrl === 'string') s.apiBaseUrl = body.deepseekBaseUrl.trim().slice(0, 300);
       if (typeof body.termStart === 'string' || body.termStart === null) {
         s.termStart = body.termStart && /^\d{4}-\d{2}-\d{2}$/.test(body.termStart) ? body.termStart : null;
+      }
+      if (typeof body.updateMirror === 'string') {
+        s.updateMirror = normalizeMirrorPrefix(body.updateMirror.slice(0, 200));
       }
       store.saveSettings();
       return send(res, 200, { ok: true, settings: s });
