@@ -26,6 +26,7 @@ const app = {
   mode: 'notice',          // notice | fun
   tab: 'today',
   selectedDay: new Date(),
+  calendarExpanded: false,
   funTab: 'all',
   selectedId: null,
   groupCache: null,
@@ -63,30 +64,64 @@ function localDayKey(date) {
   return [date.getFullYear(), pad(date.getMonth() + 1), pad(date.getDate())].join('-');
 }
 
-function isOnSelectedDay(notice) {
-  if (notice.status === 'skip' || !['new', 'todo', 'done'].includes(notice.status)) return false;
+function noticeDayKey(notice) {
+  if (!['new', 'todo', 'done'].includes(notice.status)) return null;
   const deadline = parseDeadline(notice.deadline);
   const date = deadline || (notice.status !== 'new' && notice.createdAt ? new Date(notice.createdAt) : null);
-  return date !== null && localDayKey(date) === localDayKey(app.selectedDay);
+  return date ? localDayKey(date) : null;
+}
+
+function isOnSelectedDay(notice) {
+  return noticeDayKey(notice) === localDayKey(app.selectedDay);
+}
+
+function dayAtOffset(date, offset) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + offset);
 }
 
 function renderDayBar() {
   const shown = app.mode === 'notice' && app.tab === 'today';
   $('dayBar').hidden = !shown;
   if (!shown) return;
-  const isToday = localDayKey(app.selectedDay) === localDayKey(new Date());
-  const date = app.selectedDay.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'short' });
-  $('dayTitle').textContent = (isToday ? '今天 · ' : '') + date;
-  $('todayBtn').hidden = isToday;
-  const items = visibleNotices();
-  const count = items.filter((notice) => notice.status === 'done').length;
-  $('dayProgress').textContent = items.length ? `已完成 ${count}/${items.length} 项` : '';
+
+  const selected = localDayKey(app.selectedDay);
+  const today = localDayKey(new Date());
+  const date = app.selectedDay.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
+  $('dayTitle').textContent = date;
+  $('agendaTitleHeading').textContent = selected === today ? '今日日程' : '当日日程';
+
+  const days = new Map();
+  for (const notice of notices()) {
+    const key = noticeDayKey(notice);
+    if (key === null) continue;
+    const counts = days.get(key) || { total: 0, done: 0 };
+    counts.total++;
+    if (notice.status === 'done') counts.done++;
+    days.set(key, counts);
+  }
+  const counts = days.get(selected);
+  $('dayProgress').textContent = counts ? `已完成 ${counts.done}/${counts.total} 项` : '';
+  const expanded = app.calendarExpanded;
+  const start = dayAtOffset(app.selectedDay, -app.selectedDay.getDay() - (expanded ? 7 : 0));
+  $('calendarDays').innerHTML = Array.from({ length: expanded ? 35 : 7 }, (_, index) => {
+    const day = dayAtOffset(start, index);
+    const key = localDayKey(day);
+    const state = days.get(key);
+    const allDone = state && state.done === state.total;
+    return `<button type="button" class="calendar-day" data-day="${key}" aria-pressed="${key === selected}"
+      aria-label="${key}${allDone ? '，日程已全部完成' : ''}" ${key === today ? 'aria-current="date"' : ''}>
+      ${day.getDate() === 1 ? `<small>${day.getMonth() + 1}月</small>` : ''}
+      <span>${day.getDate()}</span>${allDone ? '<i class="calendar-done" aria-hidden="true"></i>' : ''}
+    </button>`;
+  }).join('');
+  $('calendarToggle').setAttribute('aria-expanded', expanded);
+  $('calendarToggle').textContent = expanded ? '收起日历' : '展开日历';
+  $('prevDay').setAttribute('aria-label', expanded ? '向前五周' : '上一周');
+  $('nextDay').setAttribute('aria-label', expanded ? '向后五周' : '下一周');
 }
 
-function shiftDay(offset) {
-  const next = new Date(app.selectedDay);
-  next.setDate(next.getDate() + offset);
-  app.selectedDay = next;
+function shiftCalendar(direction) {
+  app.selectedDay = dayAtOffset(app.selectedDay, direction * (app.calendarExpanded ? 35 : 7));
   render();
 }
 
@@ -161,11 +196,14 @@ function funNextRunText() {
 }
 
 function renderModeSwitch() {
-  const el = document.getElementById('modeSwitch');
-  if (!el) return;
-  el.querySelectorAll('button').forEach((b) => {
-    b.classList.toggle('on', b.dataset.mode === app.mode);
-  });
+  $('navDate').textContent = new Date().getDate();
+  const view = app.tab === 'today' ? 'today' : 'all';
+  for (const button of $('modeSwitch').querySelectorAll('[data-mode]')) {
+    const active = button.dataset.mode === app.mode && (button.dataset.view ?? view) === view;
+    button.classList.toggle('on', active);
+    if (active) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  }
 }
 
 function funTabsHtml() {
@@ -293,7 +331,6 @@ function isArchived(n) { return n.status === 'skip' || n.status === 'done'; }
 
 function tabCount(id) {
   const list = notices();
-  if (id === 'today') return list.filter(isOnSelectedDay).length;
   if (id === 'all') return list.filter((n) => !isArchived(n)).length;
   if (id === 'todo') return list.filter((n) => n.status === 'todo').length;
   if (id === 'archive') return list.filter(isArchived).length;
@@ -356,6 +393,7 @@ function render() {
   renderModeSwitch();
 
   if (app.mode === 'fun') {
+    $('tabs').hidden = false;
     $('tabs').innerHTML = funTabsHtml();
     $('grid').innerHTML = visibleFun().map((n) => funCardHtml(n)).join('');
     renderFunEmpty();
@@ -407,12 +445,12 @@ function updateRunBar(state) {
 
 function renderTabs() {
   const tabs = [
-    { id: 'today', label: '今日', emoji: '' },
     { id: 'all', label: '全部', emoji: '' },
     { id: 'todo', label: '待办', emoji: '⏳' },
     ...CATS.map((c) => ({ id: c, label: c, emoji: CAT_META[c].emoji })),
     { id: 'archive', label: '归档', emoji: '🗃️' },
   ];
+  $('tabs').hidden = app.tab === 'today';
   $('tabs').innerHTML = tabs.map((t) => {
     const n = tabCount(t.id);
     return `<button class="tab ${app.tab === t.id ? 'active' : ''}" data-tab="${t.id}">
@@ -470,10 +508,10 @@ function cardHtml(n) {
   const archived = isArchived(n);
   const agenda = app.tab === 'today';
   const done = n.status === 'done';
-  const statusCls = agenda ? (done ? 'status-agenda agenda-done' : 'status-agenda') : archived ? 'status-archived' : '';
+  const statusCls = agenda ? 'status-agenda' : archived ? 'status-archived' : '';
   const check = agenda ? `<button class="card-check" data-act="${done ? 'restore' : 'done'}"
     aria-pressed="${done}" title="${done ? '标为未完成' : '标为完成'}"
-    aria-label="${done ? '标为未完成' : '标为完成'}：${esc(n.title)}">${done ? '✓' : '○'}</button>` : '';
+    aria-label="${done ? '标为未完成' : '标为完成'}：${esc(n.title)}">${done ? '✓' : ''}</button>` : '';
   const actions = agenda ? '' : archived
     ? `<button class="act main" data-act="restore">↩ 恢复到列表</button>
        <button class="act warn" data-act="delete">删除</button>`
@@ -752,7 +790,8 @@ function renderDetail() {
 
 // ── 设置抽屉 ──────────────────────────────────────────────
 function openSettings() {
-  const s = app.data.settings;
+  const s = app.data?.settings;
+  if (!s) return;
   app.draft = {
     times: [...(s.times || [])],
     days: s.days || 'daily',
@@ -1068,19 +1107,35 @@ $('tabs').addEventListener('click', (e) => {
   if (!btn) return;
   if (btn.dataset.funtab) { app.funTab = btn.dataset.funtab; render(); return; }
   app.tab = btn.dataset.tab;
-  if (app.tab === 'today') app.selectedDay = new Date();
   render();
 });
 
-$('prevDay').onclick = () => shiftDay(-1);
-$('nextDay').onclick = () => shiftDay(1);
-$('todayBtn').onclick = () => { app.selectedDay = new Date(); render(); };
+$('prevDay').onclick = () => shiftCalendar(-1);
+$('nextDay').onclick = () => shiftCalendar(1);
+$('calendarToggle').onclick = () => {
+  app.calendarExpanded = !app.calendarExpanded;
+  renderDayBar();
+};
+$('calendarDays').onclick = (event) => {
+  const day = event.target.closest('[data-day]')?.dataset.day;
+  if (!day) return;
+  app.selectedDay = new Date(day + 'T12:00:00');
+  render();
+  $('calendarDays').querySelector('[aria-pressed="true"]')?.focus({ preventScroll: true });
+};
+$('todayBtn').onclick = () => {
+  app.mode = 'notice';
+  app.tab = 'today';
+  app.selectedDay = new Date();
+  closeDetail();
+  render();
+};
 
 $('modeSwitch').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-mode]');
-  if (!b || b.dataset.mode === app.mode) return;
-  app.mode = b.dataset.mode;
-  app.selectedId = null;
+  const button = e.target.closest('[data-mode]');
+  if (!button || button.classList.contains('on')) return;
+  app.mode = button.dataset.mode;
+  if (button.dataset.view) app.tab = button.dataset.view;
   closeDetail();
   render();
 });
