@@ -4,7 +4,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SKILL="$HOME/.dsh/skills/wechat-decrypt"
+SKILL="${WECHAT_DECRYPT_DIR:-$HOME/.dsh/skills/wechat-decrypt}"
+[ -d "$SKILL/scripts/windows" ] || SKILL="$ROOT/vendor/wechat-decrypt"
 OUT="$ROOT/dist/qingsong-rili-windows"
 NODE="${NODE:-$(command -v node || true)}"
 [ -n "$NODE" ] || { echo "找不到 node，可用 NODE=/path/to/node 指定"; exit 1; }
@@ -39,7 +40,7 @@ w("settings.json", {
   organizeBackend:"deepseek", aiProvider:"deepseek",
   providerProfiles:{}, onboardingDone:false,
   apiBaseUrl:"https://api.deepseek.com", apiKey:"", apiModel:"deepseek-chat",
-  bridgeEnabled:false, bridgeToken:"", updateMirror:""
+  bridgeEnabled:false, bridgeToken:"", updateMirror:"https://gh-proxy.com/"
 });
 w("notices.json",[]); w("fun.json",[]); w("runs.json",[]);
 w("dismissed.json",[]); w("organize_queue.json",[]);
@@ -58,10 +59,25 @@ for bad in key.txt key_windows.txt per_db_keys.json all_keys.json; do
 done
 [ -d "$OUT/vendor/wechat-decrypt/decrypted" ] && { echo "拒绝打包：包含 decrypted 聊天库"; exit 1; }
 
-# ── 压缩 ──
+# ── 压缩（优先 /usr/bin/zip，Windows Git Bash 无 zip 时回退 Python zipfile） ──
 cd "$ROOT/dist"
 rm -f qingsong-rili-windows.zip
-/usr/bin/zip -qr qingsong-rili-windows.zip qingsong-rili-windows -x '*.DS_Store' '*__pycache__*'
+if command -v zip >/dev/null 2>&1; then
+  zip -qr qingsong-rili-windows.zip qingsong-rili-windows -x '*.DS_Store' '*__pycache__*'
+elif [ -x /usr/bin/zip ]; then
+  /usr/bin/zip -qr qingsong-rili-windows.zip qingsong-rili-windows -x '*.DS_Store' '*__pycache__*'
+else
+  python3 -c '
+import os, zipfile
+with zipfile.ZipFile("qingsong-rili-windows.zip", "w", zipfile.ZIP_DEFLATED) as zf:
+    for root, _, files in os.walk("qingsong-rili-windows"):
+        if "__pycache__" in root: continue
+        for f in files:
+            if f == ".DS_Store": continue
+            p = os.path.join(root, f)
+            zf.write(p, p.replace("\\", "/"))
+'
+fi
 
 echo "输出: $ROOT/dist/qingsong-rili-windows.zip"
-/usr/bin/du -sh "$ROOT/dist/qingsong-rili-windows.zip"
+du -sh "$ROOT/dist/qingsong-rili-windows.zip"
