@@ -9,6 +9,7 @@ const setupState = {
   wechatTestedOk: null,
   wechatGroupCount: 0,
   groupMode: 'notice', // notice | fun
+  groupQuery: '',
   draftGroups: [],
   draftFunGroups: [],
   aiSavedReady: false,
@@ -246,50 +247,30 @@ function renderSetupProviderGrid() {
   const grid = $('setupProviderGrid');
   if (!grid) return;
   const apiProviders = aiProvidersList().filter((p) => p.authType === 'apiKey');
-  grid.innerHTML = apiProviders.map((p) => `
-    <button type="button" class="provider-pill ${p.id === setupState.providerId ? 'on' : ''}" data-provider="${esc(p.id)}">
-      <span class="provider-pill-top">
-        ${providerIconHtml(p.id, 22)}
-        <span class="provider-pill-name">${esc(p.shortName)}</span>
-      </span>
-      ${p.badge ? `<span class="provider-pill-badge">${esc(p.badge)}</span>` : ''}
-    </button>
-  `).join('');
+  grid.innerHTML = buildProviderGridHtml({
+    providers: apiProviders,
+    activeId: setupState.providerId,
+    attrName: 'data-provider',
+  });
 }
 
 function applySetupProvider(providerId) {
   const meta = getProviderMeta(providerId);
   setupState.providerId = meta.id;
   renderSetupProviderGrid();
-
-  const saved = savedProfileFor(meta.id);
-  if ($('setupProviderTip')) $('setupProviderTip').textContent = meta.help || '';
-  if ($('setupDeepseekGuide')) $('setupDeepseekGuide').hidden = meta.id !== 'deepseek';
-
-  const link = $('setupConsoleLink');
-  if (link) {
-    if (meta.consoleUrl) {
-      link.href = meta.consoleUrl;
-      link.textContent = `${meta.consoleLabel || '获取 API Key'} ↗`;
-      link.hidden = false;
-    } else {
-      link.hidden = true;
-    }
-  }
-
-  $('setupApiKey').value = saved.apiKey || '';
-  $('setupApiKey').placeholder = meta.keyPlaceholder || '输入 API Key';
-  $('setupApiModel').value = saved.model || meta.defaultModel || '';
-  $('setupApiModel').placeholder = meta.defaultModel ? `默认：${meta.defaultModel}` : '输入模型名称，例如 qwen2.5:14b';
-  $('setupApiBaseUrl').value = saved.baseUrl || meta.baseUrl || '';
-  $('setupApiBaseUrl').placeholder = meta.baseUrl || '例如 http://127.0.0.1:11434/v1';
-
-  const chips = $('setupModelChips');
-  if (chips) {
-    chips.innerHTML = (meta.models || []).map((m) =>
-      `<button type="button" class="btn ghost mirror-chip" data-setup-model="${esc(m)}">${esc(m)}</button>`
-    ).join('');
-  }
+  syncProviderFieldsUi({
+    meta,
+    saved: savedProfileFor(meta.id),
+    tipEl: $('setupProviderTip'),
+    consoleLinkEl: $('setupConsoleLink'),
+    keyInputEl: $('setupApiKey'),
+    modelInputEl: $('setupApiModel'),
+    baseInputEl: $('setupApiBaseUrl'),
+    modelChipsEl: $('setupModelChips'),
+    modelChipAttr: 'data-setup-model',
+    deepseekGuideEl: $('setupDeepseekGuide'),
+    baseDetailsEl: $('setupBaseUrlDetails'),
+  });
 }
 
 function switchSetupMode(mode) {
@@ -328,57 +309,84 @@ function collectAiPayload() {
 }
 
 // ── Step 3: 挑选群聊与定时 ────────────────────────────────
+function wizardGroupListHtml() {
+  const isFun = setupState.groupMode === 'fun';
+  return buildGroupListHtml({
+    chats: app.groupCache || [],
+    chosenList: isFun ? setupState.draftFunGroups : setupState.draftGroups,
+    isFun,
+    query: setupState.groupQuery,
+    emptyHtml: '<div class="grp-empty">暂未读取到微信群，可返回第 1 步先完成微信环境检测，或点击下方「下一步」稍后再选。</div>',
+    checkboxAttr: 'data-wzxid',
+    maxItems: 120,
+  });
+}
+
+function renderWizardGroupPicker() {
+  const wrap = $('wizardGroupPickerWrap');
+  if (!wrap) return;
+  wrap.innerHTML = renderGroupPickerHtml({
+    idPrefix: 'wizardGrp',
+    activeMode: setupState.groupMode,
+    noticeCount: setupState.draftGroups.length,
+    funCount: setupState.draftFunGroups.length,
+    query: setupState.groupQuery,
+    listHtml: app.groupCache ? wizardGroupListHtml() : '<div class="grp-empty">正在读取微信群列表…</div>',
+    listClass: 'grp-list wizard-grp-list',
+  });
+
+  $('wizardGrpMode')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-gmode]');
+    if (!btn) return;
+    setupState.groupMode = btn.dataset.gmode;
+    for (const b of $('wizardGrpMode').querySelectorAll('[data-gmode]')) {
+      b.classList.toggle('on', b.dataset.gmode === setupState.groupMode);
+    }
+    $('wizardGrpHint').textContent = setupState.groupMode === 'fun'
+      ? '勾选游戏群、吃喝群、闲聊群，AI 会生成像真人群友复盘一样的省流群聊总结。'
+      : '勾选班群、学院通知群、作业群等，AI 会自动提取截止时间和待办卡片。';
+    $('wizardGrpList').innerHTML = wizardGroupListHtml();
+  });
+
+  $('wizardGrpSearch')?.addEventListener('input', (e) => {
+    setupState.groupQuery = e.target.value;
+    $('wizardGrpList').innerHTML = wizardGroupListHtml();
+  });
+
+  $('wizardGrpList')?.addEventListener('change', (e) => {
+    const cb = e.target;
+    if (cb.type !== 'checkbox' || !cb.dataset.wzxid) return;
+    const wxid = cb.dataset.wzxid;
+    const g = (app.groupCache || []).find((x) => x.wxid === wxid);
+    if (!g) return;
+    const key = setupState.groupMode === 'fun' ? 'draftFunGroups' : 'draftGroups';
+    if (cb.checked) {
+      if (!setupState[key].some((x) => x.wxid === wxid)) {
+        setupState[key].push({ wxid, name: g.display });
+      }
+    } else {
+      setupState[key] = setupState[key].filter((x) => x.wxid !== wxid);
+    }
+    $('wizardGrpNoticeTab').textContent = `📚 通知群 (${setupState.draftGroups.length})`;
+    $('wizardGrpFunTab').textContent = `🎮 娱乐群 (${setupState.draftFunGroups.length})`;
+    updateStepBadges();
+  });
+}
+
 async function loadWizardGroups() {
-  const box = $('wizardGrpList');
-  if (!box) return;
-  if (app.groupCache && app.groupCache.length) {
-    renderWizardGroupList();
-    return;
-  }
-  box.innerHTML = '<div class="grp-empty">正在读取微信群列表…</div>';
+  renderWizardGroupPicker();
+  if (app.groupCache && app.groupCache.length) return;
   try {
     const res = await api('/api/groups', { method: 'POST' });
     app.groupCache = Array.isArray(res.chats) ? res.chats : [];
-    renderWizardGroupList();
+    const box = $('wizardGrpList');
+    if (box) box.innerHTML = wizardGroupListHtml();
   } catch (e) {
-    box.innerHTML = `<div class="grp-empty">暂时无法读取微信群列表（${esc(e.message || '请先完成第 1 步本地微信配置')}），可先跳过此步稍后在「更多」里选群。</div>`;
+    const box = $('wizardGrpList');
+    if (box) {
+      box.innerHTML = `<div class="grp-empty">暂时无法读取微信群列表（${esc(e.message || '请先完成第 1 步本地微信配置')}），可先跳过此步稍后在「更多」里选群。</div>`;
+    }
   }
-}
-
-function renderWizardGroupList() {
-  const box = $('wizardGrpList');
-  if (!box) return;
-  $('wizardNoticeTab').textContent = `📚 通知群 (${setupState.draftGroups.length})`;
-  $('wizardFunTab').textContent = `🎮 娱乐群 (${setupState.draftFunGroups.length})`;
-  $('wizardGroupHint').textContent = setupState.groupMode === 'notice'
-    ? '勾选班群、学院通知群、作业群等，AI 会自动提取截止时间和待办卡片。'
-    : '勾选游戏群、吃喝群、闲聊群，AI 会生成像真人群友复盘一样的省流群聊总结。';
-
-  const list = app.groupCache || [];
-  if (!list.length) {
-    box.innerHTML = '<div class="grp-empty">暂未读取到微信群，可返回第 1 步先完成微信环境检测，或点击下方「下一步」稍后再选。</div>';
-    return;
-  }
-  const isFun = setupState.groupMode === 'fun';
-  const chosenArr = isFun ? setupState.draftFunGroups : setupState.draftGroups;
-  const chosen = new Map(chosenArr.map((g) => [g.wxid, g]));
-  const q = ($('wizardGrpSearch')?.value || '').trim().toLowerCase();
-  const filtered = list
-    .filter((g) => (isFun ? (g.isGroup || chosen.has(g.wxid)) : (g.isGroup || g.isFriend || chosen.has(g.wxid))))
-    .filter((g) => !q || String(g.display || '').toLowerCase().includes(q));
-
-  if (!filtered.length) {
-    box.innerHTML = '<div class="grp-empty">没有匹配的群聊</div>';
-    return;
-  }
-  box.innerHTML = filtered.slice(0, 120).map((g) => `
-    <label class="grp-row">
-      <input type="checkbox" data-wzxid="${esc(g.wxid)}" ${chosen.has(g.wxid) ? 'checked' : ''} />
-      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(g.display)}</span>
-      <span class="grp-time">${relTime(g.ts)}</span>
-      <span class="tag">${g.isGroup ? '群聊' : '好友'}</span>
-    </label>
-  `).join('');
 }
 
 // ── Step 4: 总览 ──────────────────────────────────────────
@@ -568,9 +576,10 @@ function maybeOpenOnboarding() {
   const s = app.data.settings || {};
   const needsGuide = !s.onboardingDone && (!app.data.env?.wechatReady || !isAiReady() || !(s.groups?.length || s.funGroups?.length));
   if (!needsGuide) return;
-  if (setupDialog?.open || $('updateDialog')?.open) return;
   setupState.autoShown = true;
-  openSetupDialog();
+  ModalQueue.enqueue(2, 'setup', () => {
+    if (!setupDialog?.open) openSetupDialog();
+  });
 }
 
 // ── 事件绑定 ──────────────────────────────────────────────
@@ -746,37 +755,6 @@ $('testSetupBtn')?.addEventListener('click', async () => {
   }
 });
 
-$('wizardGroupMode')?.addEventListener('click', (e) => {
-  const btn = e.target.closest('[data-gmode]');
-  if (!btn) return;
-  setupState.groupMode = btn.dataset.gmode;
-  for (const b of $('wizardGroupMode').querySelectorAll('[data-gmode]')) {
-    b.classList.toggle('on', b.dataset.gmode === setupState.groupMode);
-  }
-  renderWizardGroupList();
-});
-
-$('wizardGrpSearch')?.addEventListener('input', renderWizardGroupList);
-
-$('wizardGrpList')?.addEventListener('change', (e) => {
-  const cb = e.target;
-  if (cb.type !== 'checkbox' || !cb.dataset.wzxid) return;
-  const wxid = cb.dataset.wzxid;
-  const g = (app.groupCache || []).find((x) => x.wxid === wxid);
-  if (!g) return;
-  const key = setupState.groupMode === 'fun' ? 'draftFunGroups' : 'draftGroups';
-  if (cb.checked) {
-    if (!setupState[key].some((x) => x.wxid === wxid)) {
-      setupState[key].push({ wxid, name: g.display });
-    }
-  } else {
-    setupState[key] = setupState[key].filter((x) => x.wxid !== wxid);
-  }
-  $('wizardNoticeTab').textContent = `📚 通知群 (${setupState.draftGroups.length})`;
-  $('wizardFunTab').textContent = `🎮 娱乐群 (${setupState.draftFunGroups.length})`;
-  updateStepBadges();
-});
-
 $('wizardPrevBtn')?.addEventListener('click', () => goWizardStep(setupState.step - 1));
 
 $('wizardNextBtn')?.addEventListener('click', async () => {
@@ -811,7 +789,7 @@ async function finishWizard({ runNow = false } = {}) {
       $('runBtn').click();
     }
   } else {
-    toast('配置已保存，随时可点顶部「向导」再次查看');
+    toast('配置已保存，随时可在「更多 → 联动与向导」再次打开');
   }
 }
 
@@ -827,5 +805,6 @@ async function dismissSetupGuide() {
 
 $('skipSetupBtn')?.addEventListener('click', dismissSetupGuide);
 $('closeSetup')?.addEventListener('click', dismissSetupGuide);
+ModalQueue.bindBackdropClose(setupDialog, { onClose: dismissSetupGuide });
 
 if (app.data) maybeOpenOnboarding();

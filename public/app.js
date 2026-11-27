@@ -29,6 +29,8 @@ const app = {
   calendarExpanded: false,
   funTab: 'all',
   selectedId: null,
+  settingsTab: 'groups',   // groups | ai | connect | updates
+  settingsGroupMode: 'notice', // notice | fun
   groupCache: null,
   groupLoading: false,
   groupQuery: '',
@@ -418,10 +420,23 @@ async function clearArchive() {
 
 function render() {
   if (!app.data) return;
-  const { settings, state } = app.data;
+  const { settings, state, env } = app.data;
 
   $('nextRun').textContent = app.mode === 'fun' ? funNextRunText() : nextRunText(settings);
   $('runBtn').disabled = app.mode === 'fun' ? Boolean(app.data.fun?.running) : state.running;
+
+  const strip = $('setupStrip');
+  if (strip) {
+    const needsSetup = !env?.ready || !env?.wechatReady;
+    const dismissed = sessionStorage.getItem('qs_strip_dismissed') === '1';
+    strip.hidden = !needsSetup || dismissed;
+    if (!strip.hidden && $('setupStripText')) {
+      $('setupStripText').textContent = !env?.wechatReady
+        ? '👋 本机微信读取环境尚未就绪，点右侧「打开向导」2 分钟配置好。'
+        : '👋 还没配置 AI 整理渠道（默认 DeepSeek），点右侧「打开向导」填入 Key 即可。';
+    }
+  }
+
   updateRunBar(state);
   renderDayBar();
   renderModeSwitch();
@@ -897,171 +912,181 @@ function groupEmptyHtml() {
   return `<div class="grp-empty">读取失败：${esc(app.groupError)}<br/><button class="btn ghost" onclick="retryGroups()" style="margin-top:10px;padding:6px 14px">重试</button></div>`;
 }
 
+function renderSettingsGroupListHtml() {
+  const d = app.draft;
+  if (!d) return '<div class="grp-empty">正在读取微信群列表…</div>';
+  const all = app.groupCache || [];
+  if (!all.length) return groupEmptyHtml();
+  const isFun = app.settingsGroupMode === 'fun';
+  return buildGroupListHtml({
+    chats: all,
+    chosenList: isFun ? d.funGroups : d.groups,
+    isFun,
+    query: app.groupQuery,
+    emptyHtml: groupEmptyHtml(),
+    checkboxAttr: 'data-sgwxid',
+  });
+}
+
 function renderSettings() {
   const d = app.draft;
   if (!d) return;
-  const all = app.groupCache || [];
-  const chosen = new Map(d.groups.map((g) => [g.wxid, g]));
-  // 只展示群聊与好友；已勾选但被过滤的仍保留，否则用户没法取消它
-  const groups = all.filter((g) => g.isGroup || g.isFriend || chosen.has(g.wxid));
-  const q = app.groupQuery.toLowerCase();
-  const filtered = groups.filter((g) => !q || g.display.toLowerCase().includes(q) || (g.isGroup ? '群' : '人').includes(q));
+  const env = app.data?.env || {};
+  const tab = app.settingsTab || 'groups';
+  const activePid = env.provider || 'deepseek';
+  const bridge = app.data?.bridge;
 
   $('settingsBody').innerHTML = `
-    <div class="s-block wizard-banner-block">
-      <div class="wizard-banner">
-        <div>
-          <div class="s-title" style="margin-bottom:4px">🧭 首次配置向导</div>
-          <div class="s-desc" style="margin-bottom:0">
-            本地微信 ${app.data.env?.wechatReady ? '<span class="ok-dot">● 已就绪</span>' : '<span class="warn-dot">● 待配置</span>'} ·
-            AI ${app.data.env?.ready ? `<span class="ok-dot">● ${esc(app.data.env?.providerName || 'DeepSeek')}</span>` : '<span class="warn-dot">● 待配置</span>'} ·
-            群聊 ${(d.groups.length + d.funGroups.length) ? `<span class="ok-dot">● 已选 ${d.groups.length + d.funGroups.length} 个</span>` : '<span class="warn-dot">● 未选</span>'}
+    <div class="seg settings-tabs" id="settingsTabs" role="tablist">
+      <button type="button" class="${tab === 'groups' ? 'on' : ''}" data-stab="groups">群聊与定时</button>
+      <button type="button" class="${tab === 'ai' ? 'on' : ''}" data-stab="ai">AI 渠道</button>
+      <button type="button" class="${tab === 'connect' ? 'on' : ''}" data-stab="connect">联动与向导</button>
+      <button type="button" class="${tab === 'updates' ? 'on' : ''}" data-stab="updates">更新与日志</button>
+    </div>
+
+    <!-- 1. 群聊与定时 -->
+    <div class="settings-pane" data-spane="groups" ${tab === 'groups' ? '' : 'hidden'}>
+      <div class="s-block">
+        <div class="s-title">👥 监听哪些群</div>
+        ${renderGroupPickerHtml({
+          idPrefix: 'settingsGrp',
+          activeMode: app.settingsGroupMode,
+          noticeCount: d.groups.length,
+          funCount: d.funGroups.length,
+          query: app.groupQuery,
+          listHtml: renderSettingsGroupListHtml(),
+        })}
+      </div>
+
+      <div class="s-block">
+        <div class="s-title">⏰ 自动整理与范围</div>
+        <div class="s-desc">到点自动读取群消息并整理通知。可以添加多个时刻。</div>
+        <div class="chips" id="timeChips">
+          ${d.times.map((t) => `<span class="time-chip">${t}<button type="button" data-del="${t}">×</button></span>`).join('')}
+          <input type="time" id="newTime" value="08:00" />
+          <button type="button" class="btn ghost" id="addTime" style="padding:8px 14px">+ 添加</button>
+        </div>
+        <div style="margin-top:12px" class="seg" id="daysSeg">
+          <button type="button" data-days="daily" class="${d.days === 'daily' ? 'on' : ''}">每天</button>
+          <button type="button" data-days="weekday" class="${d.days === 'weekday' ? 'on' : ''}">仅工作日</button>
+        </div>
+        <div class="settings-inline-grid" style="margin-top:14px">
+          <label>
+            <span>🔎 往回看多久</span>
+            <select class="s-select" id="lookback">
+              ${[[6,'最近 6 小时'],[12,'最近 12 小时'],[24,'最近 1 天'],[48,'最近 2 天'],[72,'最近 3 天'],[168,'最近 7 天'],[720,'最近 30 天'],[8760,'全部历史']].map(([h, label]) => `<option value="${h}" ${Number(app.data.settings.lookbackHours) === h ? 'selected' : ''}>${label}</option>`).join('')}
+            </select>
+          </label>
+          <label>
+            <span>📅 学期第一周周一（可选）</span>
+            <input type="date" class="s-input" id="termStart" value="${app.data.settings.termStart || ''}" />
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. AI 渠道 -->
+    <div class="settings-pane" data-spane="ai" ${tab === 'ai' ? '' : 'hidden'}>
+      <div class="s-block">
+        <div class="s-title">🤖 模型渠道商（默认 DeepSeek）</div>
+        <div class="s-desc">通知提取与娱乐群总结都会使用当前选择的渠道；各渠道的 Key 独立保存在本机，切换不丢失。</div>
+        <div class="ai-status-row">
+          <span class="ai-status-name">${providerIconHtml(activePid, 20)}<span>当前：<strong>${esc(env.providerFullName || 'DeepSeek')}</strong> ${env.ready ? '<span class="ok-dot">● 已就绪</span>' : '<span class="warn-dot">● 待配置</span>'}</span></span>
+          <button type="button" class="btn ghost mirror-chip" id="openSetupGuideBtn">配置引导</button>
+        </div>
+        <input type="hidden" id="aiProvider" value="${esc(activePid)}" />
+        <div class="provider-grid settings-provider-grid" id="settingsProviderGrid">
+          ${buildProviderGridHtml({ providers: env.providers || [], activeId: activePid, attrName: 'data-settings-provider' })}
+        </div>
+        <div id="settingsApiFields">
+          <div class="provider-tip" id="settingsProviderTip" style="margin-top:10px"></div>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px">
+            <a id="settingsConsoleLink" class="setup-link" target="_blank" rel="noopener noreferrer" hidden>获取 API Key ↗</a>
+          </div>
+          <div class="key-input-wrap" style="margin-top:6px">
+            <input class="s-input" id="apiKey" type="password" placeholder="API Key（只存本机 data/settings.json）" value="" />
+            <button type="button" class="btn ghost key-eye" id="settingsKeyToggle">显示</button>
+          </div>
+          <input class="s-input" id="apiModel" placeholder="模型名，例如 deepseek-chat" value="" style="width:100%;margin-top:8px" />
+          <div class="mirror-chips" id="settingsModelChips"></div>
+          <details class="prompt-preview" id="settingsBaseUrlDetails">
+            <summary>高级选项：接口地址（Base URL）</summary>
+            <div style="margin-top:8px">
+              <input class="s-input" id="apiBaseUrl" placeholder="Base URL，例如 https://api.deepseek.com" value="" style="width:100%" />
+            </div>
+          </details>
+        </div>
+        <div id="settingsWorkbuddyFields" hidden style="margin-top:10px">
+          <div class="provider-tip">${env.workbuddyCli ? `已检测到本机 WorkBuddy 命令行（${esc(env.workbuddyCli)}），点下方按钮打开终端输入 /login 完成授权。` : '本机未检测到 WorkBuddy 命令行，建议切换 DeepSeek 等 API Key 渠道。'}</div>
+          <div class="ai-action-row">
+            <button type="button" class="btn ghost" id="settingsWorkbuddyLogin" ${env.workbuddyCli ? '' : 'disabled'}>打开账号登录终端</button>
           </div>
         </div>
-        <button type="button" class="btn primary" id="openWizardFromSettings">打开向导</button>
-      </div>
-    </div>
-
-    <div class="s-block">
-      <div class="s-title">⏰ 什么时候自动整理</div>
-      <div class="s-desc">到点我会去读你选的群，把新通知整理好。可以设多个时间。</div>
-      <div class="chips" id="timeChips">
-        ${d.times.map((t) => `<span class="time-chip">${t}<button data-del="${t}">×</button></span>`).join('')}
-        <input type="time" id="newTime" value="08:00" />
-        <button class="btn ghost" id="addTime" style="padding:8px 14px">+ 添加</button>
-      </div>
-      <div style="margin-top:14px" class="seg" id="daysSeg">
-        <button data-days="daily" class="${d.days === 'daily' ? 'on' : ''}">每天</button>
-        <button data-days="weekday" class="${d.days === 'weekday' ? 'on' : ''}">仅工作日</button>
-      </div>
-    </div>
-
-    <div class="s-block">
-      <div class="s-title">📚 整理哪些群 <span style="font-weight:400;color:var(--muted);font-size:12.5px">已选 ${d.groups.length} 个</span></div>
-      <div class="s-desc">按最近活跃排序，只显示群聊和你加的好友。可以搜群名，比如"班群""通知""兼职"。</div>
-      <input class="s-input grp-search" id="grpSearch" placeholder="搜索群名…" value="${esc(app.groupQuery)}" />
-      <div class="grp-list" id="grpList">
-        ${groups.length === 0
-          ? groupEmptyHtml()
-          : filtered.length === 0
-            ? `<div class="grp-empty">没有匹配的群</div>`
-            : filtered.map((g) => `<label class="grp-row">
-                <input type="checkbox" data-wxid="${esc(g.wxid)}" ${chosen.has(g.wxid) ? 'checked' : ''} />
-                <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(g.display)}</span>
-                <span class="grp-time">${relTime(g.ts)}</span>
-                <span class="tag">${g.isGroup ? '群聊' : (g.isFriend ? '好友' : '其他')}</span>
-              </label>`).join('')}
-      </div>
-    </div>
-
-    <div class="s-block">
-      <div class="s-title">🎮 娱乐群 <span style="font-weight:400;color:var(--muted);font-size:12.5px">已选 ${d.funGroups.length} 个</span></div>
-      <div class="s-desc">游戏、动漫、吃喝、桌游这些群单独整理，不会混进上面的通知。</div>
-      <input class="s-input grp-search" id="funSearch" placeholder="搜索娱乐群…" />
-      <div class="grp-list" id="funList">
-        ${groups.length === 0
-          ? groupEmptyHtml()
-          : (() => {
-              const fq = (app.funQuery || '').toLowerCase();
-              const fh = new Map(d.funGroups.map((g) => [g.wxid, g]));
-              const list = groups.filter((g) => (g.isGroup || fh.has(g.wxid)) && (!fq || g.display.toLowerCase().includes(fq)));
-              return list.length === 0
-                ? `<div class="grp-empty">没有匹配的群</div>`
-                : list.map((g) => `<label class="grp-row">
-                    <input type="checkbox" data-funwxid="${esc(g.wxid)}" ${fh.has(g.wxid) ? 'checked' : ''} />
-                    <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(g.display)}</span>
-                    <span class="grp-time">${relTime(g.ts)}</span>
-                    <span class="tag">群聊</span>
-                  </label>`).join('');
-            })()}
-      </div>
-    </div>
-
-    <div class="s-block">
-      <div class="s-title">📅 学期开始日期</div>
-      <div class="s-desc">填第一周的周一。这样通知里写「第十周」「第十五周」时，AI 能自己换算成具体日期。</div>
-      <input type="date" class="s-input" id="termStart" value="${app.data.settings.termStart || ''}" style="width:100%" />
-      <div class="dl-hint" style="margin-top:8px">不知道的话留空，周次类通知的截止时间会变成「待定」，你可以手动改。</div>
-    </div>
-
-    <div class="s-block">
-      <div class="s-title">🔎 往回看多久</div>
-      <div class="s-desc">每次整理读取最近这段时间的消息。太短可能漏，太长会慢。</div>
-      <select class="s-select" id="lookback">
-        ${[[6,'最近 6 小时'],[12,'最近 12 小时'],[24,'最近 1 天'],[48,'最近 2 天'],[72,'最近 3 天'],[168,'最近 7 天'],[720,'最近 30 天'],[8760,'全部历史']].map(([h, label]) => `<option value="${h}" ${Number(app.data.settings.lookbackHours) === h ? 'selected' : ''}>${label}</option>`).join('')}
-      </select>
-    </div>
-
-    <div class="s-block">
-      <div class="s-title">🖼️ 图片里的文字</div>
-      <div class="s-desc">已停用。原来的图片文字识别走的是本机 codex 多模态，会消耗 ds token；现在整理全部由 WorkBuddy 完成，只处理文字消息。以后要看图时会由 WorkBuddy 自己识别。</div>
-      <label class="switch" hidden><input type="checkbox" id="ocrToggle" /></label>
-    </div>
-
-    <div class="s-block">
-      <div class="s-title">🤖 AI 整理渠道商</div>
-      <div class="s-desc">默认使用 <strong>DeepSeek</strong>，同时支持多家国内/国际模型接口及 WorkBuddy 账号登录，通知整理与娱乐群总结都会使用当前所选渠道。</div>
-      <div class="ai-status-row">
-        <span class="ai-status-name">${providerIconHtml(app.data.env?.provider || 'deepseek', 20)}<span>当前渠道：<strong>${esc(app.data.env?.providerFullName || 'DeepSeek')}</strong> ${app.data.env?.ready ? '<span class="ok-dot">● 已就绪</span>' : '<span class="warn-dot">● 待配置</span>'}</span></span>
-        <button type="button" class="btn ghost mirror-chip" id="openSetupGuideBtn">配置引导</button>
-      </div>
-      <input type="hidden" id="aiProvider" value="${esc(app.data.env?.provider || 'deepseek')}" />
-      <div class="provider-grid settings-provider-grid" id="settingsProviderGrid">
-        ${(app.data.env?.providers || []).map((p) => `
-          <button type="button" class="provider-pill ${(app.data.env?.provider || 'deepseek') === p.id ? 'on' : ''}" data-settings-provider="${esc(p.id)}">
-            <span class="provider-pill-top">
-              ${providerIconHtml(p.id, 20)}
-              <span class="provider-pill-name">${esc(p.shortName)}</span>
-            </span>
-            ${p.badge ? `<span class="provider-pill-badge">${esc(p.badge)}</span>` : ''}
-          </button>
-        `).join('')}
-      </div>
-      <div id="settingsApiFields">
-        <div class="provider-tip" id="settingsProviderTip" style="margin-top:8px"></div>
-        <div style="display:flex;justify-content:flex-end;margin-top:6px">
-          <a id="settingsConsoleLink" class="setup-link" target="_blank" rel="noopener noreferrer" hidden>获取 API Key ↗</a>
-        </div>
-        <input class="s-input" id="apiKey" type="password" placeholder="API Key（只存本机 data/settings.json）" value="" style="width:100%;margin-top:6px" />
-        <input class="s-input" id="apiModel" placeholder="模型名，例如 deepseek-chat" value="" style="width:100%;margin-top:8px" />
-        <div class="mirror-chips" id="settingsModelChips"></div>
-        <input class="s-input" id="apiBaseUrl" placeholder="Base URL，例如 https://api.deepseek.com" value="" style="width:100%;margin-top:8px" />
-      </div>
-      <div id="settingsWorkbuddyFields" hidden style="margin-top:8px">
-        <div class="provider-tip">${app.data.env?.workbuddyCli ? `已检测到本机 WorkBuddy 命令行（${esc(app.data.env.workbuddyCli)}），点下方按钮打开终端输入 /login 完成授权。` : '本机未检测到 WorkBuddy 命令行，建议切换 DeepSeek 等 API Key 渠道。'}</div>
         <div class="ai-action-row">
-          <button type="button" class="btn ghost" id="settingsWorkbuddyLogin" ${app.data.env?.workbuddyCli ? '' : 'disabled'}>打开账号登录终端</button>
+          <button type="button" class="btn ghost" id="testAiBtn">测试连接</button>
+        </div>
+        <div class="setup-feedback" id="settingsAiFeedback" hidden></div>
+      </div>
+    </div>
+
+    <!-- 3. 联动与向导 -->
+    <div class="settings-pane" data-spane="connect" ${tab === 'connect' ? '' : 'hidden'}>
+      <div class="s-block wizard-banner-block">
+        <div class="wizard-banner">
+          <div>
+            <div class="s-title" style="margin-bottom:4px">🧭 4 步配置向导与环境体检</div>
+            <div class="s-desc" style="margin-bottom:0">
+              本地微信 ${env.wechatReady ? '<span class="ok-dot">● 已就绪</span>' : '<span class="warn-dot">● 待配置</span>'} ·
+              AI ${env.ready ? `<span class="ok-dot">● ${esc(env.providerName || 'DeepSeek')}</span>` : '<span class="warn-dot">● 待配置</span>'} ·
+              群聊 ${(d.groups.length + d.funGroups.length) ? `<span class="ok-dot">● 已选 ${d.groups.length + d.funGroups.length} 个</span>` : '<span class="warn-dot">● 未选</span>'}
+            </div>
+          </div>
+          <button type="button" class="btn primary" id="openWizardFromSettings">打开向导</button>
         </div>
       </div>
-      <div class="ai-action-row">
-        <button type="button" class="btn ghost" id="testAiBtn">测试连接</button>
-      </div>
-      <div class="setup-feedback" id="settingsAiFeedback" hidden></div>
-      <label class="switch" hidden><input type="checkbox" id="aiToggle" /></label>
-    </div>
 
-    <div class="s-block">
-      <div class="s-title">应用更新</div>
-      <div class="s-desc">当前版本 <strong>${esc(app.data.env?.version || '—')}</strong></div>
-      <label class="inline-toggle"><input type="checkbox" id="autoCheckUpdate" /> 启动时检查更新</label>
-      <div style="margin-top:10px">
-        <div class="s-desc" style="margin-bottom:6px">下载加速镜像（留空直连，失败自动切换备用镜像）</div>
-        <input class="s-input" id="updateMirror" placeholder="留空表示直连，例如 https://gh-proxy.com/" value="${esc(d.updateMirror || '')}" />
-        <div class="mirror-chips" id="updateMirrorChips">
-          <button type="button" class="btn ghost mirror-chip" data-mirror="">直连 GitHub</button>
-          <button type="button" class="btn ghost mirror-chip" data-mirror="https://gh-proxy.com/">gh-proxy.com</button>
-          <button type="button" class="btn ghost mirror-chip" data-mirror="https://ghfast.top/">ghfast.top</button>
-          <button type="button" class="btn ghost mirror-chip" data-mirror="https://gh-proxy.org/">gh-proxy.org</button>
+      <div class="s-block">
+        <div class="wizard-card">
+          <div class="wizard-card-head" style="margin-bottom:6px">
+            <div>
+              <div class="wizard-card-title">📱 连接手机「轻松打卡」</div>
+              <div class="wizard-card-desc">${bridge?.enabled && bridge?.listening ? `局域网同步已开启（端口 ${bridge.port}），手机端可随时同步今日日程。` : '开启同一 Wi-Fi 下的局域网同步后，电脑待办与手机打卡互相实时打通。'}</div>
+            </div>
+            <a class="btn ghost" href="/bridge.html" target="_blank" rel="noopener noreferrer">打开配对页 ↗</a>
+          </div>
         </div>
       </div>
-      <button class="btn ghost" id="checkUpdateBtn" style="margin-top:10px">检查更新</button>
     </div>
 
-    <div class="s-block">
-      <div class="s-title">📋 最近整理</div>
-      <div class="run-log">${renderRunLog()}</div>
-    </div>
+    <!-- 4. 更新与日志 -->
+    <div class="settings-pane" data-spane="updates" ${tab === 'updates' ? '' : 'hidden'}>
+      <div class="s-block">
+        <div class="s-title">🔄 应用更新</div>
+        <div class="s-desc">当前版本 <strong>v${esc(env.version || '—')}</strong> · 每次打开应用都会自动检测新版本</div>
+        <label class="inline-toggle"><input type="checkbox" id="autoCheckUpdate" /> 进入应用时自动检查更新</label>
+        <div style="margin-top:12px">
+          <div class="s-desc" style="margin-bottom:6px">GitHub 下载加速镜像（留空直连，失败自动切换备用镜像）</div>
+          <input class="s-input" id="updateMirror" style="width:100%" placeholder="留空表示直连，例如 https://gh-proxy.com/" value="${esc(d.updateMirror || '')}" />
+          <div class="mirror-chips" id="updateMirrorChips">
+            <button type="button" class="btn ghost mirror-chip" data-mirror="">直连 GitHub</button>
+            <button type="button" class="btn ghost mirror-chip" data-mirror="https://gh-proxy.com/">gh-proxy.com</button>
+            <button type="button" class="btn ghost mirror-chip" data-mirror="https://ghfast.top/">ghfast.top</button>
+            <button type="button" class="btn ghost mirror-chip" data-mirror="https://gh-proxy.org/">gh-proxy.org</button>
+          </div>
+        </div>
+        <div class="ai-action-row">
+          <button type="button" class="btn primary" id="checkUpdateBtn">立即检查更新</button>
+          <button type="button" class="btn ghost" id="openAnnFromSettings">查看更新公告</button>
+        </div>
+      </div>
 
+      <div class="s-block">
+        <details class="prompt-preview" open>
+          <summary>📋 最近整理记录（近 5 次）</summary>
+          <div class="run-log" style="margin-top:8px">${renderRunLog()}</div>
+        </details>
+      </div>
+    </div>
   `;
 
   bindSettings();
@@ -1080,6 +1105,20 @@ function renderRunLog() {
 
 function bindSettings() {
   const d = app.draft;
+
+  $('settingsTabs')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-stab]');
+    if (!btn) return;
+    const next = btn.dataset.stab;
+    app.settingsTab = next;
+    for (const b of $('settingsTabs').querySelectorAll('[data-stab]')) {
+      b.classList.toggle('on', b.dataset.stab === next);
+    }
+    for (const p of $('settingsBody').querySelectorAll('[data-spane]')) {
+      p.hidden = p.dataset.spane !== next;
+    }
+  });
+
   $('addTime').onclick = () => {
     const v = $('newTime').value;
     if (v && !d.times.includes(v)) { d.times.push(v); d.times.sort(); renderSettings(); }
@@ -1092,75 +1131,41 @@ function bindSettings() {
     const v = e.target.dataset?.days;
     if (v) { d.days = v; renderSettings(); }
   };
-  const search = $('grpSearch');
-  search.oninput = () => {
-    app.groupQuery = search.value;
-    const sel = document.getElementById('grpList');
-    const q = search.value.toLowerCase();
-    const chosen = new Map(d.groups.map((g) => [g.wxid, g]));
-    const filtered = (app.groupCache || [])
-      .filter((g) => g.isGroup || g.isFriend || chosen.has(g.wxid))
-      .filter((g) => !q || g.display.toLowerCase().includes(q));
-    sel.innerHTML = filtered.length === 0
-      ? `<div class="grp-empty">没有匹配的群</div>`
-      : filtered.map((g) => `<label class="grp-row">
-          <input type="checkbox" data-wxid="${esc(g.wxid)}" ${chosen.has(g.wxid) ? 'checked' : ''} />
-          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(g.display)}</span>
-          <span class="grp-time">${relTime(g.ts)}</span>
-          <span class="tag">${g.isGroup ? '群聊' : (g.isFriend ? '好友' : '其他')}</span>
-        </label>`).join('');
-  };
-  // 娱乐群搜索与勾选
-  const funSearch = $('funSearch');
-  if (funSearch) {
-    funSearch.oninput = () => {
-      const q = funSearch.value.toLowerCase();
-      const chosen = new Map(d.funGroups.map((g) => [g.wxid, g]));
-      const list = (app.groupCache || [])
-        .filter((g) => g.isGroup || chosen.has(g.wxid))
-        .filter((g) => !q || g.display.toLowerCase().includes(q));
-      $('funList').innerHTML = list.length === 0
-        ? `<div class="grp-empty">没有匹配的群</div>`
-        : list.map((g) => `<label class="grp-row">
-            <input type="checkbox" data-funwxid="${esc(g.wxid)}" ${chosen.has(g.wxid) ? 'checked' : ''} />
-            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(g.display)}</span>
-            <span class="grp-time">${relTime(g.ts)}</span>
-            <span class="tag">群聊</span>
-          </label>`).join('');
-    };
-  }
-  const funList = $('funList');
-  if (funList) {
-    funList.addEventListener('change', (e) => {
-      const cb = e.target;
-      if (cb.type !== 'checkbox') return;
-      const wxid = cb.dataset.funwxid;
-      const g = (app.groupCache || []).find((x) => x.wxid === wxid);
-      if (!g) return;
-      if (cb.checked) {
-        if (!d.funGroups.some((x) => x.wxid === wxid)) d.funGroups.push({ wxid, name: g.display });
-      } else {
-        d.funGroups = d.funGroups.filter((x) => x.wxid !== wxid);
-      }
-      const t = funList.parentElement.querySelector('.s-title span');
-      if (t) t.textContent = `已选 ${d.funGroups.length} 个`;
-    });
-  }
 
-  $('grpList').addEventListener('change', (e) => {
+  $('settingsGrpMode')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-gmode]');
+    if (!btn) return;
+    app.settingsGroupMode = btn.dataset.gmode;
+    for (const b of $('settingsGrpMode').querySelectorAll('[data-gmode]')) {
+      b.classList.toggle('on', b.dataset.gmode === app.settingsGroupMode);
+    }
+    $('settingsGrpHint').textContent = app.settingsGroupMode === 'fun'
+      ? '勾选游戏群、吃喝群、闲聊群，AI 会生成像真人群友复盘一样的省流群聊总结。'
+      : '勾选班群、学院通知群、作业群等，AI 会自动提取截止时间和待办卡片。';
+    $('settingsGrpList').innerHTML = renderSettingsGroupListHtml();
+  });
+
+  $('settingsGrpSearch')?.addEventListener('input', (e) => {
+    app.groupQuery = e.target.value;
+    $('settingsGrpList').innerHTML = renderSettingsGroupListHtml();
+  });
+
+  $('settingsGrpList')?.addEventListener('change', (e) => {
     const cb = e.target;
-    if (cb.type !== 'checkbox') return;
-    const wxid = cb.dataset.wxid;
+    if (cb.type !== 'checkbox' || !cb.dataset.sgwxid) return;
+    const wxid = cb.dataset.sgwxid;
     const g = (app.groupCache || []).find((x) => x.wxid === wxid);
     if (!g) return;
+    const key = app.settingsGroupMode === 'fun' ? 'funGroups' : 'groups';
     if (cb.checked) {
-      if (!d.groups.some((x) => x.wxid === wxid)) d.groups.push({ wxid, name: g.display });
+      if (!d[key].some((x) => x.wxid === wxid)) d[key].push({ wxid, name: g.display });
     } else {
-      d.groups = d.groups.filter((x) => x.wxid !== wxid);
+      d[key] = d[key].filter((x) => x.wxid !== wxid);
     }
-    const cnt = document.querySelector('.s-title span');
-    if (cnt) cnt.textContent = `已选 ${d.groups.length} 个`;
+    $('settingsGrpNoticeTab').textContent = `📚 通知群 (${d.groups.length})`;
+    $('settingsGrpFunTab').textContent = `🎮 娱乐群 (${d.funGroups.length})`;
   });
+
   const providerSel = $('aiProvider');
   const syncSettingsProviderUi = (pid) => {
     const meta = typeof getProviderMeta === 'function' ? getProviderMeta(pid) : null;
@@ -1169,24 +1174,18 @@ function bindSettings() {
     $('settingsWorkbuddyFields').hidden = !isAccount;
     if (!isAccount && meta) {
       const saved = typeof savedProfileFor === 'function' ? savedProfileFor(pid) : {};
-      $('settingsProviderTip').textContent = meta.help || '';
-      const link = $('settingsConsoleLink');
-      if (meta.consoleUrl) {
-        link.href = meta.consoleUrl;
-        link.textContent = `${meta.consoleLabel || '获取 API Key'} ↗`;
-        link.hidden = false;
-      } else {
-        link.hidden = true;
-      }
-      $('apiKey').value = saved.apiKey || '';
-      $('apiKey').placeholder = meta.keyPlaceholder || '输入 API Key';
-      $('apiModel').value = saved.model || meta.defaultModel || '';
-      $('apiModel').placeholder = meta.defaultModel ? `默认：${meta.defaultModel}` : '输入模型名称';
-      $('apiBaseUrl').value = saved.baseUrl || meta.baseUrl || '';
-      $('apiBaseUrl').placeholder = meta.baseUrl || '例如 http://127.0.0.1:11434/v1';
-      $('settingsModelChips').innerHTML = (meta.models || []).map((m) =>
-        `<button type="button" class="btn ghost mirror-chip" data-settings-model="${esc(m)}">${esc(m)}</button>`
-      ).join('');
+      syncProviderFieldsUi({
+        meta,
+        saved,
+        tipEl: $('settingsProviderTip'),
+        consoleLinkEl: $('settingsConsoleLink'),
+        keyInputEl: $('apiKey'),
+        modelInputEl: $('apiModel'),
+        baseInputEl: $('apiBaseUrl'),
+        modelChipsEl: $('settingsModelChips'),
+        modelChipAttr: 'data-settings-model',
+        baseDetailsEl: $('settingsBaseUrlDetails'),
+      });
     }
   };
   if (providerSel) {
@@ -1204,6 +1203,12 @@ function bindSettings() {
       if (fb) fb.hidden = true;
     });
   }
+  $('settingsKeyToggle')?.addEventListener('click', () => {
+    const inp = $('apiKey');
+    const show = inp.type === 'password';
+    inp.type = show ? 'text' : 'password';
+    $('settingsKeyToggle').textContent = show ? '隐藏' : '显示';
+  });
   $('settingsModelChips')?.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-settings-model]');
     if (btn) $('apiModel').value = btn.dataset.settingsModel;
@@ -1215,6 +1220,10 @@ function bindSettings() {
   $('openSetupGuideBtn')?.addEventListener('click', () => {
     closeSettings();
     if (typeof openSetupDialog === 'function') openSetupDialog({ step: 2 });
+  });
+  $('openAnnFromSettings')?.addEventListener('click', () => {
+    closeSettings();
+    openAnnouncements();
   });
   $('settingsWorkbuddyLogin')?.addEventListener('click', async () => {
     const fb = $('settingsAiFeedback');
@@ -1269,8 +1278,7 @@ function bindSettings() {
       groups: d.groups,
       lookbackHours: Number($('lookback').value),
       funGroups: d.funGroups,
-      aiEnabled: $('aiToggle').checked,
-      ocrImages: $('ocrToggle').checked,
+      ocrImages: false,
       termStart: $('termStart').value || null,
       aiProvider: pid,
       organizeBackend: pid === 'workbuddy' ? 'workbuddy' : (pid === 'deepseek' ? 'deepseek' : 'openai'),
@@ -1345,13 +1353,24 @@ $('calendarDays').onclick = (event) => {
   render();
   $('calendarDays').querySelector('[aria-pressed="true"]')?.focus({ preventScroll: true });
 };
-$('todayBtn').onclick = () => {
-  app.mode = 'notice';
-  app.tab = 'today';
-  app.selectedDay = new Date();
-  closeDetail();
-  render();
-};
+const todayBtn = $('todayBtn');
+if (todayBtn) {
+  todayBtn.onclick = () => {
+    app.mode = 'notice';
+    app.tab = 'today';
+    app.selectedDay = new Date();
+    closeDetail();
+    render();
+  };
+}
+
+$('setupStripOpen')?.addEventListener('click', () => {
+  if (typeof openSetupDialog === 'function') openSetupDialog();
+});
+$('setupStripClose')?.addEventListener('click', () => {
+  sessionStorage.setItem('qs_strip_dismissed', '1');
+  if ($('setupStrip')) $('setupStrip').hidden = true;
+});
 
 $('modeSwitch').addEventListener('click', (e) => {
   const button = e.target.closest('[data-mode]');
@@ -1391,8 +1410,7 @@ $('drawer').addEventListener('click', (e) => {
 });
 
 $('mask').onclick = () => {
-  if (!$('annDrawer').hidden) closeAnnouncements();
-  else if (!$('settingsDrawer').hidden) closeSettings();
+  if (!$('settingsDrawer').hidden) closeSettings();
   else closeDetail();
 };
 
@@ -1425,8 +1443,8 @@ $('runBtn').onclick = async () => {
 
 $('settingsBtn').onclick = openSettings;
 $('annBtn').onclick = () => {
-  if ($('annDrawer').hidden) openAnnouncements();
-  else closeAnnouncements();
+  if ($('annDialog')?.open) closeAnnouncements();
+  else openAnnouncements();
 };
 $('closeAnn').onclick = closeAnnouncements;
 $('annOk').onclick = closeAnnouncements;
@@ -1446,8 +1464,7 @@ $('emptyAction').onclick = () => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    if (!$('annDrawer').hidden) closeAnnouncements();
-    else if (!$('settingsDrawer').hidden) closeSettings();
+    if (!$('settingsDrawer').hidden) closeSettings();
     else if (!$('drawer').hidden) closeDetail();
   }
 });
@@ -1600,18 +1617,21 @@ $('annOpenWizard')?.addEventListener('click', () => {
 });
 
 function openAnnouncements() {
-  $('mask').hidden = false;
-  $('annDrawer').hidden = false;
+  const dlg = $('annDialog');
+  if (!dlg) return;
   renderAnnouncements();
+  if (!dlg.open) dlg.showModal();
   // 看过了就记下来，角标随之消失
   localStorage.setItem(ANN_SEEN_KEY, annLatest());
   updateAnnDot();
 }
 
 function closeAnnouncements() {
-  $('annDrawer').hidden = true;
-  if ($('drawer').hidden && $('settingsDrawer').hidden) $('mask').hidden = true;
+  const dlg = $('annDialog');
+  if (dlg?.open) dlg.close();
 }
+
+ModalQueue.bindBackdropClose($('annDialog'));
 
 async function loadAnnouncements() {
   try {
@@ -1625,15 +1645,14 @@ async function loadAnnouncements() {
   updateAnnDot();
   renderAnnouncements();
 
-  // 有新内容时自动展开一次（不与配置向导或更新弹窗抢焦点）
+  // 有新内容时通过 ModalQueue 排队居中展示（优先让位给更新弹窗和首次配置向导）
   if (annHasUnseen() && !sessionStorage.getItem('qs_ann_auto')) {
     sessionStorage.setItem('qs_ann_auto', '1');
-    setTimeout(() => {
-      const dialogOpen = $('setupDialog')?.open || $('updateDialog')?.open;
-      if (!dialogOpen && $('annDrawer').hidden && $('settingsDrawer').hidden && $('drawer').hidden) {
+    ModalQueue.enqueue(3, 'announcement', () => {
+      if ($('settingsDrawer').hidden && $('drawer').hidden && $('addDrawer').hidden) {
         openAnnouncements();
       }
-    }, 1200);
+    });
   }
 }
 
