@@ -59,15 +59,22 @@ for bad in key.txt key_windows.txt per_db_keys.json all_keys.json; do
 done
 [ -d "$OUT/vendor/wechat-decrypt/decrypted" ] && { echo "拒绝打包：包含 decrypted 聊天库"; exit 1; }
 
-# ── 压缩（优先 /usr/bin/zip，Windows Git Bash 无 zip 时回退 Python zipfile） ──
+# ── 压缩（优先 zip，Windows Git Bash 无 zip 时回退真实 python/python3） ──
 cd "$ROOT/dist"
 rm -f qingsong-rili-windows.zip
+PY_BIN=""
+for cand in python3 python; do
+  if command -v "$cand" >/dev/null 2>&1 && "$cand" -c "import zipfile" >/dev/null 2>&1; then
+    PY_BIN="$cand"
+    break
+  fi
+done
 if command -v zip >/dev/null 2>&1; then
   zip -qr qingsong-rili-windows.zip qingsong-rili-windows -x '*.DS_Store' '*__pycache__*'
 elif [ -x /usr/bin/zip ]; then
   /usr/bin/zip -qr qingsong-rili-windows.zip qingsong-rili-windows -x '*.DS_Store' '*__pycache__*'
-else
-  python3 -c '
+elif [ -n "$PY_BIN" ]; then
+  "$PY_BIN" -c '
 import os, zipfile
 with zipfile.ZipFile("qingsong-rili-windows.zip", "w", zipfile.ZIP_DEFLATED) as zf:
     for root, _, files in os.walk("qingsong-rili-windows"):
@@ -77,6 +84,8 @@ with zipfile.ZipFile("qingsong-rili-windows.zip", "w", zipfile.ZIP_DEFLATED) as 
             p = os.path.join(root, f)
             zf.write(p, p.replace("\\", "/"))
 '
+else
+  echo "找不到 zip 或可用 python，无法压缩"; exit 1
 fi
 
 echo "输出: $ROOT/dist/qingsong-rili-windows.zip"
