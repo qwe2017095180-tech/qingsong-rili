@@ -18,9 +18,9 @@ const addUI = {
 
   open() {
     if (addUI.saving) return;
-    if (!$('settingsDrawer').hidden) closeSettings();
+    if ($('settingsDialog')?.open) closeSettings();
     if (!$('drawer').hidden) closeDetail();
-    if (!$('annDrawer').hidden) closeAnnouncements();
+    if (typeof closeAnnouncements === 'function') closeAnnouncements();
     $('directAgenda').reset();
     $('agendaDate').value = localDayKey(app.tab === 'today' ? app.selectedDay : new Date());
     $('addText').value = '';
@@ -35,7 +35,7 @@ const addUI = {
   close() {
     if (addUI.saving) return;
     $('addDrawer').hidden = true;
-    if ($('drawer').hidden && $('settingsDrawer').hidden && $('annDrawer').hidden) $('mask').hidden = true;
+    if ($('drawer').hidden) $('mask').hidden = true;
   },
 
   async submit() {

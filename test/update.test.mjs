@@ -4,7 +4,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createUpdater } from '../lib/update.mjs';
+import {
+  applyMirrorPrefix,
+  createUpdater,
+  formatNetworkError,
+  normalizeMirrorPrefix,
+} from '../lib/update.mjs';
 
 function setup(t) {
   const dir = mkdtempSync(path.join(tmpdir(), 'qingsong-update-'));
@@ -39,8 +44,8 @@ function setup(t) {
 
   const updater = createUpdater(install, '1.2.0', async () => Response.json({
     tag_name: 'v1.3.0', draft: false, prerelease: false, body: '发布日期',
-  }));
-  return { install, publish, updater };
+  }), { retryDelayMs: 0, fallbackMirrors: [] });
+  return { dir, remote, install, publish, updater };
 }
 
 test('checks, installs the stable tag and retains local notices', async (t) => {
@@ -73,6 +78,93 @@ test('rejects releases that would change the data directory', async (t) => {
 });
 
 test('a repository without a stable release has no update', async () => {
-  const updater = createUpdater(tmpdir(), '1.3.0', async () => new Response(null, { status: 404 }));
+  const updater = createUpdater(tmpdir(), '1.3.0', async () => new Response(null, { status: 404 }), {
+    retryDelayMs: 0,
+  });
   assert.deepEqual(await updater.check(), { current: '1.3.0', latest: null, hasUpdate: false });
+});
+
+test('retries transient release check failure and formats network errors cleanly', async () => {
+  let calls = 0;
+  const updater = createUpdater(tmpdir(), '1.3.0', async () => {
+    calls++;
+    if (calls === 1) throw new TypeError('fetch failed');
+    return Response.json({ tag_name: 'v1.3.2', draft: false, prerelease: false, body: '修复断流' });
+  }, { retryDelayMs: 0, maxAttempts: 2 });
+
+  const res = await updater.check();
+  assert.equal(calls, 2);
+  assert.equal(res.hasUpdate, true);
+  assert.equal(res.latest, '1.3.2');
+
+  assert.equal(normalizeMirrorPrefix('https://gh-proxy.com'), 'https://gh-proxy.com/');
+  assert.equal(normalizeMirrorPrefix('not-a-url'), '');
+  assert.equal(
+    applyMirrorPrefix('https://github.com/a/b.git', 'https://gh-proxy.com'),
+    'https://gh-proxy.com/https://github.com/a/b.git',
+  );
+  assert.match(formatNetworkError(new Error('fetch failed https://secret.example/x?jwt=123')), /无法连接 GitHub/);
+});
+
+test('falls back to mirror remote when direct git fetch fails', async (t) => {
+  const { remote, install, publish } = setup(t);
+  publish();
+  const git = (cwd, ...args) => execFileSync('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+  // Make direct GitHub URL point to a broken path, and mirror URL point to the real local remote.
+  git(install, 'config', '--unset', `url.${remote}.insteadOf`);
+  git(install, 'config', 'url.file:///nonexistent-qingsong-repo.insteadOf', 'https://github.com/qwe2017095180-tech/qingsong-rili.git');
+  git(install, 'config', `url.${remote}.insteadOf`, 'https://mirror.example/https://github.com/qwe2017095180-tech/qingsong-rili.git');
+
+  const updater = createUpdater(install, '1.2.0', async () => Response.json({
+    tag_name: 'v1.3.0', draft: false, prerelease: false, body: '镜像回退测试',
+  }), {
+    retryDelayMs: 0,
+    maxAttempts: 1,
+    fallbackMirrors: ['https://mirror.example/'],
+  });
+
+  const result = await updater.install('v1.3.0');
+  assert.equal(result.restartRequired, true);
+  assert.equal(readFileSync(path.join(install, 'version.json'), 'utf8'), '{"version":"1.3.0"}');
+});
+
+test('falls back to web release redirect when GitHub API returns 403 rate limit', async () => {
+  const seenUrls = [];
+  const updater = createUpdater(tmpdir(), '1.3.1', async (url) => {
+    seenUrls.push(url);
+    if (url.startsWith('https://api.github.com/')) {
+      return new Response(JSON.stringify({ message: 'API rate limit exceeded' }), { status: 403 });
+    }
+    if (url.endsWith('/releases/latest')) {
+      return new Response(null, {
+        status: 302,
+        headers: { location: 'https://github.com/qwe2017095180-tech/qingsong-rili/releases/tag/v1.3.2' },
+      });
+    }
+    if (url.endsWith('/v1.3.2/version.json')) {
+      return Response.json({ version: '1.3.2', notes: '绕过 API 限流检查更新' });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { retryDelayMs: 0, maxAttempts: 1 });
+
+  const res = await updater.check();
+  assert.equal(res.hasUpdate, true);
+  assert.equal(res.latest, '1.3.2');
+  assert.equal(res.tag, 'v1.3.2');
+  assert.equal(res.notes, '绕过 API 限流检查更新');
+  assert.equal(seenUrls.length, 3);
+});
+
+test('web fallback returns no update when repository redirects to /releases without a tag', async () => {
+  const updater = createUpdater(tmpdir(), '1.3.2', async (url) => {
+    if (url.startsWith('https://api.github.com/')) {
+      return new Response(null, { status: 403 });
+    }
+    return new Response(null, {
+      status: 302,
+      headers: { location: 'https://github.com/qwe2017095180-tech/qingsong-rili/releases' },
+    });
+  }, { retryDelayMs: 0, maxAttempts: 1 });
+
+  assert.deepEqual(await updater.check(), { current: '1.3.2', latest: null, hasUpdate: false });
 });

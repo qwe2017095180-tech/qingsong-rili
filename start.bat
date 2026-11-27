@@ -3,6 +3,11 @@ chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
 
+if exist "%~dp0desktop\node_modules\.bin\electron.cmd" (
+  start "" /B "%~dp0desktop\node_modules\.bin\electron.cmd" "%~dp0desktop"
+  exit /b 0
+)
+
 where node >nul 2>nul
 if errorlevel 1 (
   echo [ERROR] Node.js not found. Install Node.js 18+ from https://nodejs.org and run this again.
