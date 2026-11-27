@@ -12,17 +12,19 @@ NODE="${NODE:-$(command -v node || true)}"
 [ -d "$SKILL/scripts/windows" ] || { echo "找不到微信解密技能: $SKILL"; exit 1; }
 
 rm -rf "$OUT"
-mkdir -p "$OUT/lib" "$OUT/public" "$OUT/data" \
+mkdir -p "$OUT/lib" "$OUT/public" "$OUT/data" "$OUT/desktop/build" \
          "$OUT/vendor/wechat-decrypt/scripts/common" \
          "$OUT/vendor/wechat-decrypt/scripts/windows"
 
 # ── 应用代码 ──
-cp "$ROOT"/server.mjs "$ROOT"/mcp-server.mjs "$ROOT"/wb-bridge.mjs "$OUT"/
+cp "$ROOT"/server.mjs "$ROOT"/mcp-server.mjs "$ROOT"/wb-bridge.mjs "$ROOT"/version.json "$OUT"/
 cp "$ROOT"/start.bat "$ROOT"/start.ps1 "$ROOT"/INSTALL_FOR_AI.md "$OUT"/
-for f in store.mjs wechat.mjs queue.mjs fun-summary.mjs workbuddy-model.mjs model-openai.mjs providers.mjs bridge.mjs update.mjs; do
+for f in store.mjs wechat.mjs queue.mjs fun-summary.mjs workbuddy-model.mjs model-openai.mjs providers.mjs agents.mjs bridge.mjs update.mjs; do
   cp "$ROOT/lib/$f" "$OUT/lib/"
 done
 cp "$ROOT"/public/* "$OUT/public/"
+cp "$ROOT"/desktop/main.js "$ROOT"/desktop/package.json "$ROOT"/desktop/package-lock.json "$ROOT"/desktop/README.md "$OUT/desktop/"
+cp "$ROOT"/desktop/build/icon.ico "$ROOT"/desktop/build/icon.png "$ROOT"/desktop/build/make-shortcuts.js "$OUT/desktop/build/"
 
 # ── 空白数据（绝不带个人聊天摘要）──
 "$NODE" -e '
@@ -33,7 +35,10 @@ w("settings.json", {
   lookbackHours:24, limitPerGroup:400,
   aiEnabled:false, ocrImages:false, termStart:null,
   lastRunAt:null, lastRunDate:null, lastRunSlots:[],
-  organizeBackend:"auto", deepseekApiKey:"", deepseekModel:"deepseek-chat"
+  organizeBackend:"deepseek", aiProvider:"deepseek",
+  providerProfiles:{}, onboardingDone:false,
+  apiBaseUrl:"https://api.deepseek.com", apiKey:"", apiModel:"deepseek-chat",
+  bridgeEnabled:false, bridgeToken:"", updateMirror:""
 });
 w("notices.json",[]); w("fun.json",[]); w("runs.json",[]);
 w("dismissed.json",[]); w("organize_queue.json",[]);

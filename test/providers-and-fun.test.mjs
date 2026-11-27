@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import {
   AI_PROVIDERS,
@@ -14,6 +17,7 @@ import {
   summarizeFunWithModel,
 } from '../lib/fun-summary.mjs';
 import { wechatDiagnostics } from '../lib/wechat.mjs';
+import { detectLocalAgents } from '../lib/agents.mjs';
 
 test('defaults to DeepSeek and triggers onboarding when unconfigured', () => {
   const prevDeepseek = process.env.DEEPSEEK_API_KEY;
@@ -194,4 +198,37 @@ test('wechatDiagnostics reports structured checks without exposing key contents'
   assert.equal(typeof diag.checks.pythonVenv, 'boolean');
   assert.equal(typeof diag.checks.keyFile, 'boolean');
   assert.equal(typeof diag.checks.queryScript, 'boolean');
+});
+
+test('detectLocalAgents finds agents dynamically on any macOS or Windows machine', (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qingsong-agents-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+  // Simulated macOS user ~/Applications
+  const macUserApps = path.join(tmp, 'mac-apps');
+  fs.mkdirSync(path.join(macUserApps, 'Cursor.app'), { recursive: true });
+  fs.mkdirSync(path.join(macUserApps, 'DeepSeek Harness.app'), { recursive: true });
+  const macRes = detectLocalAgents({
+    platform: 'darwin',
+    macAppDirs: [macUserApps],
+  });
+  const macInstalled = macRes.filter((a) => a.installed).map((a) => a.id).sort();
+  assert.deepEqual(macInstalled, ['cursor', 'dsh']);
+
+  // Simulated Windows machine with exe + Start Menu .lnk shortcuts
+  const winLocal = path.join(tmp, 'LocalAppData');
+  const winStart = path.join(tmp, 'StartMenu');
+  fs.mkdirSync(path.join(winLocal, 'Programs', 'WorkBuddy'), { recursive: true });
+  fs.writeFileSync(path.join(winLocal, 'Programs', 'WorkBuddy', 'WorkBuddy.exe'), '');
+  fs.mkdirSync(path.join(winStart, '字节跳动'), { recursive: true });
+  fs.writeFileSync(path.join(winStart, '字节跳动', '豆包.lnk'), '');
+  fs.writeFileSync(path.join(winStart, 'DeepSeek Harness.lnk'), '');
+
+  const winRes = detectLocalAgents({
+    platform: 'win32',
+    env: { LOCALAPPDATA: winLocal },
+    winStartMenuDirs: [winStart],
+  });
+  const winInstalled = winRes.filter((a) => a.installed).map((a) => a.id).sort();
+  assert.deepEqual(winInstalled, ['doubao', 'dsh', 'workbuddy']);
 });

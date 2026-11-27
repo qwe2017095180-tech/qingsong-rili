@@ -14,6 +14,7 @@ import { activeProviderId, getProvider, isValidProviderId } from './lib/provider
 import { pending, recent, complete } from './lib/queue.mjs';
 import { initBridge, bridgeInfo, setBridgeEnabled, resetToken, createAgendaNotices } from './lib/bridge.mjs';
 import { createUpdater, normalizeMirrorPrefix } from './lib/update.mjs';
+import { detectLocalAgents } from './lib/agents.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, 'public');
@@ -49,81 +50,6 @@ const runningVersion = readVersion().version;
 const updater = createUpdater(__dirname, runningVersion, fetch, {
   getMirror: () => store.settings.updateMirror || '',
 });
-
-/** 探测本机已安装的常见 AI Agent 桌面软件（用于一键唤起协助配置本地微信） */
-function detectLocalAgents() {
-  const isMac = process.platform === 'darwin';
-  const isWin = process.platform === 'win32';
-  const home = process.env.HOME || '';
-  const localApp = process.env.LOCALAPPDATA || '';
-  const defs = [
-    {
-      id: 'workbuddy',
-      name: 'WorkBuddy',
-      desc: '直接执行命令帮配好',
-      macPaths: ['/Applications/WorkBuddy AI.app', '/Applications/WorkBuddy.app'],
-      winPaths: [
-        localApp && path.join(localApp, 'Programs', 'WorkBuddy', 'WorkBuddy.exe'),
-        localApp && path.join(localApp, 'Programs', 'WorkBuddy AI', 'WorkBuddy AI.exe'),
-      ],
-    },
-    {
-      id: 'dsh',
-      name: 'DeepSeek Harness',
-      desc: 'DSH 桌面助手',
-      macPaths: ['/Applications/DeepSeek Harness.app'],
-      winPaths: [localApp && path.join(localApp, 'Programs', 'DeepSeek Harness', 'DeepSeek Harness.exe')],
-    },
-    {
-      id: 'doubao',
-      name: '豆包',
-      desc: '字节豆包桌面端',
-      macPaths: ['/Applications/Doubao.app', '/Applications/豆包.app'],
-      winPaths: [localApp && path.join(localApp, 'Doubao', 'Doubao.exe')],
-    },
-    {
-      id: 'antigravity',
-      name: 'Antigravity',
-      desc: '本地开发 Agent',
-      macPaths: ['/Applications/Antigravity.app'],
-      winPaths: [],
-    },
-    {
-      id: 'chatgpt',
-      name: 'ChatGPT',
-      desc: 'OpenAI 桌面端',
-      macPaths: ['/Applications/ChatGPT.app'],
-      winPaths: [],
-    },
-    {
-      id: 'cursor',
-      name: 'Cursor',
-      desc: 'AI 编程助手',
-      macPaths: ['/Applications/Cursor.app', home && path.join(home, 'Applications', 'Cursor.app')],
-      winPaths: [localApp && path.join(localApp, 'Programs', 'cursor', 'Cursor.exe')],
-    },
-    {
-      id: 'claude',
-      name: 'Claude',
-      desc: 'Anthropic 桌面端',
-      macPaths: ['/Applications/Claude.app'],
-      winPaths: [localApp && path.join(localApp, 'AnthropicClaude', 'claude.exe')],
-    },
-  ];
-  return defs.map((d) => {
-    const candidates = (isMac ? d.macPaths : (isWin ? d.winPaths : [])).filter(Boolean);
-    const appPath = candidates.find((p) => {
-      try { return fs.existsSync(p); } catch { return false; }
-    }) || null;
-    return {
-      id: d.id,
-      name: d.name,
-      desc: d.desc,
-      installed: Boolean(appPath),
-      appPath,
-    };
-  });
-}
 
 /** 跨平台打开浏览器：macOS 用 open，Windows 用 start，Linux 用 xdg-open */
 function openUrl(url) {
