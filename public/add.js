@@ -18,7 +18,7 @@ const addUI = {
 
   open() {
     if (addUI.saving) return;
-    if (!$('settingsDrawer').hidden) closeSettings();
+    if ($('settingsDialog')?.open) closeSettings();
     if (!$('drawer').hidden) closeDetail();
     if (typeof closeAnnouncements === 'function') closeAnnouncements();
     $('directAgenda').reset();
@@ -35,7 +35,7 @@ const addUI = {
   close() {
     if (addUI.saving) return;
     $('addDrawer').hidden = true;
-    if ($('drawer').hidden && $('settingsDrawer').hidden) $('mask').hidden = true;
+    if ($('drawer').hidden) $('mask').hidden = true;
   },
 
   async submit() {

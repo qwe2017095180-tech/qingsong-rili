@@ -676,7 +676,7 @@ input[type="time"]:focus, .s-input:focus, .s-select:focus { border-color: #bfe6d
 
 .grp-search { width: 100%; margin-bottom: 10px; }
 .grp-list {
-  max-height: 320px;
+  max-height: 260px;
   overflow-y: auto;
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -710,10 +710,32 @@ input[type="time"]:focus, .s-input:focus, .s-select:focus { border-color: #bfe6d
 .grp-empty { padding: 24px; text-align: center; color: var(--muted); font-size: 13px; }
 
 .grp-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.picker-refresh {
+  padding: 6px 11px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.picker-refresh:disabled { opacity: 0.6; cursor: wait; }
 .picker-hint { margin: 8px 0 10px; }
 
 /* 设置分组标签与双列网格 */
-.settings-drawer-body { padding-top: 16px !important; }
+.settings-dialog { width: min(640px, calc(100vw - 28px)); }
+.settings-modal-inner { overflow: hidden; }
+.settings-modal-head { flex: none; margin-bottom: 12px; }
+.settings-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 4px 4px 0;
+}
+.settings-modal-footer { flex: none; margin-top: 12px; }
 .settings-tabs {
   position: sticky;
   top: 0;
@@ -1165,6 +1187,7 @@ input[type="time"]:focus, .s-input:focus, .s-select:focus { border-color: #bfe6d
   border-top: 1px solid var(--line);
 }
 .ann-dialog { width: min(620px, calc(100vw - 28px)); }
+.settings-dialog { width: min(640px, calc(100vw - 28px)); }
 .update-dialog { width: min(480px, calc(100vw - 28px)); }
 .wizard-dialog { width: min(650px, calc(100vw - 28px)); }
 

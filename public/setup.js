@@ -353,6 +353,34 @@ function renderWizardGroupPicker() {
     $('wizardGrpList').innerHTML = wizardGroupListHtml();
   });
 
+  $('wizardGrpRefresh')?.addEventListener('click', async () => {
+    const btn = $('wizardGrpRefresh');
+    const box = $('wizardGrpList');
+    if (!btn || btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = '刷新中…';
+    if (box) box.innerHTML = '<div class="grp-empty">正在重新拉取微信群列表…</div>';
+    try {
+      const res = await api('/api/groups', { method: 'POST' });
+      if (res.ok === false) throw new Error(res.error || '读取失败');
+      app.groupCache = Array.isArray(res.chats) ? res.chats : [];
+      app.groupError = null;
+      if (box) box.innerHTML = wizardGroupListHtml();
+      toast(`已刷新，读取到 ${app.groupCache.length} 个微信会话`);
+    } catch (err) {
+      const msg = err?.isNetwork
+        ? '连不上本地服务，请确认启动窗口还在运行'
+        : String(err?.message || '请先完成第 1 步本地微信配置').slice(0, 160);
+      if (box) {
+        box.innerHTML = `<div class="grp-empty">暂时无法读取微信群列表（${esc(msg)}），可点击右上角「🔄 刷新群聊」重试。</div>`;
+      }
+      toast(`刷新群聊失败：${msg}`);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '🔄 刷新群聊';
+    }
+  });
+
   $('wizardGrpList')?.addEventListener('change', (e) => {
     const cb = e.target;
     if (cb.type !== 'checkbox' || !cb.dataset.wzxid) return;

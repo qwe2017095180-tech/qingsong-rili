@@ -85,17 +85,22 @@
 
 <aside class="drawer" id="drawer" hidden></aside>
 
-<aside class="drawer settings" id="settingsDrawer" hidden>
-  <div class="drawer-head">
-    <h2>更多</h2>
-    <button class="close" id="closeSettings" aria-label="关闭设置">×</button>
+<dialog id="settingsDialog" class="modal-dialog settings-dialog" aria-labelledby="settingsDialogTitle">
+  <div class="modal-inner settings-modal-inner">
+    <div class="modal-head settings-modal-head">
+      <div>
+        <h2 id="settingsDialogTitle">更多设置</h2>
+        <div class="ann-head-sub">群聊监听、AI 渠道、手机联动与版本更新</div>
+      </div>
+      <button type="button" class="close" id="closeSettings" aria-label="关闭设置">×</button>
+    </div>
+    <div class="settings-modal-body" id="settingsBody"></div>
+    <div class="modal-footer settings-modal-footer">
+      <button type="button" class="btn primary" id="saveSettings" style="flex:1">保存设置</button>
+      <button type="button" class="btn ghost" id="cancelSettings">取消</button>
+    </div>
   </div>
-  <div class="drawer-body settings-drawer-body" id="settingsBody"></div>
-  <div class="s-foot-fixed">
-    <button class="btn primary" id="saveSettings" style="flex:1">保存设置</button>
-    <button class="btn ghost" id="cancelSettings">取消</button>
-  </div>
-</aside>
+</dialog>
 
 <aside class="drawer settings" id="addDrawer" hidden>
   <div class="drawer-head">

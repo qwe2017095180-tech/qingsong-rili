@@ -340,7 +340,7 @@ async function load({ quiet = false } = {}) {
     if (typeof maybeOpenOnboarding === 'function') maybeOpenOnboarding();
     if (wasDisconnected) {
       toast('已重新连上本地服务');
-      if (!$('settingsDrawer').hidden && app.groupError) retryGroups();
+      if ($('settingsDialog')?.open && app.groupError) retryGroups();
     }
   } catch (e) {
     const firstDisconnect = !app.disconnected;
@@ -686,7 +686,7 @@ function openDetail(id) {
 function closeDetail() {
   app.selectedId = null;
   $('drawer').hidden = true;
-  if ($('settingsDrawer').hidden) $('mask').hidden = true;
+  if ($('addDrawer').hidden) $('mask').hidden = true;
 }
 
 function renderFunDetail(n) {
@@ -854,7 +854,7 @@ function renderDetail() {
   };
 }
 
-// ── 设置抽屉 ──────────────────────────────────────────────
+// ── 设置弹窗 ──────────────────────────────────────────────
 function openSettings() {
   const s = app.data?.settings;
   if (!s) return;
@@ -865,23 +865,47 @@ function openSettings() {
     funGroups: (s.funGroups || []).map((g) => ({ ...g })),
     updateMirror: s.updateMirror || '',
   };
-  $('mask').hidden = false;
-  $('settingsDrawer').hidden = false;
   renderSettings();
+  const dlg = $('settingsDialog');
+  if (dlg && !dlg.open) dlg.showModal();
   loadGroups();
 }
 
 function closeSettings() {
-  $('settingsDrawer').hidden = true;
-  if ($('drawer').hidden) $('mask').hidden = true;
+  const dlg = $('settingsDialog');
+  if (dlg?.open) dlg.close();
   app.draft = null;
 }
 
-async function loadGroups() {
-  if (app.groupCache && app.groupCache.length) return renderSettings();
-  if (app.groupLoading) return;
+ModalQueue.bindBackdropClose($('settingsDialog'), { onClose: closeSettings });
+$('settingsDialog')?.addEventListener('close', () => {
+  app.draft = null;
+});
+
+function updateSettingsGroupListUi() {
+  const listEl = $('settingsGrpList');
+  if (listEl) listEl.innerHTML = renderSettingsGroupListHtml();
+  const d = app.draft;
+  if (d) {
+    if ($('settingsGrpNoticeTab')) $('settingsGrpNoticeTab').textContent = `📚 通知群 (${d.groups.length})`;
+    if ($('settingsGrpFunTab')) $('settingsGrpFunTab').textContent = `🎮 娱乐群 (${d.funGroups.length})`;
+  }
+}
+
+async function loadGroups({ force = false } = {}) {
+  if (!force && app.groupCache && app.groupCache.length) {
+    updateSettingsGroupListUi();
+    return true;
+  }
+  if (app.groupLoading) return false;
   app.groupLoading = true;
-  $('settingsBody').querySelector('#grpList')?.classList.add('loading');
+  if (force) {
+    app.groupCache = null;
+    app.groupError = null;
+    const listEl = $('settingsGrpList');
+    if (listEl) listEl.innerHTML = '<div class="grp-empty">正在重新拉取微信群列表…</div>';
+  }
+  $('settingsGrpList')?.classList.add('loading');
   app.groupError = null;
   try {
     const res = await api('/api/groups', { method: 'POST' });
@@ -894,17 +918,32 @@ async function loadGroups() {
       : String((err && err.message) || err || '读取失败').slice(0, 200);
   } finally {
     app.groupLoading = false;
+    $('settingsGrpList')?.classList.remove('loading');
+    updateSettingsGroupListUi();
   }
-  renderSettings();
+  return !app.groupError;
 }
 
-// 供设置面板里的「重试」按钮调用
+// 供设置弹窗里的「🔄 刷新群聊」与「重试」按钮调用
 async function retryGroups() {
-  app.groupCache = null;
-  app.groupError = null;
-  renderSettings();
-  if (app.disconnected || !app.data) await load({ quiet: true });
-  return loadGroups();
+  const btn = $('settingsGrpRefresh');
+  if (app.groupLoading) return;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '刷新中…';
+  }
+  try {
+    if (app.disconnected || !app.data) await load({ quiet: true });
+    const ok = await loadGroups({ force: true });
+    if (ok) toast(`已刷新，读取到 ${(app.groupCache || []).length} 个微信会话`);
+    else if (app.groupError) toast(`刷新群聊失败：${app.groupError}`);
+  } finally {
+    const curBtn = $('settingsGrpRefresh');
+    if (curBtn) {
+      curBtn.disabled = false;
+      curBtn.textContent = '🔄 刷新群聊';
+    }
+  }
 }
 
 function groupEmptyHtml() {
@@ -1148,6 +1187,10 @@ function bindSettings() {
   $('settingsGrpSearch')?.addEventListener('input', (e) => {
     app.groupQuery = e.target.value;
     $('settingsGrpList').innerHTML = renderSettingsGroupListHtml();
+  });
+
+  $('settingsGrpRefresh')?.addEventListener('click', () => {
+    retryGroups();
   });
 
   $('settingsGrpList')?.addEventListener('change', (e) => {
@@ -1410,8 +1453,7 @@ $('drawer').addEventListener('click', (e) => {
 });
 
 $('mask').onclick = () => {
-  if (!$('settingsDrawer').hidden) closeSettings();
-  else closeDetail();
+  closeDetail();
 };
 
 $('runBtn').onclick = async () => {
@@ -1463,9 +1505,8 @@ $('emptyAction').onclick = () => {
 };
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    if (!$('settingsDrawer').hidden) closeSettings();
-    else if (!$('drawer').hidden) closeDetail();
+  if (e.key === 'Escape' && !$('drawer').hidden) {
+    closeDetail();
   }
 });
 
@@ -1649,7 +1690,7 @@ async function loadAnnouncements() {
   if (annHasUnseen() && !sessionStorage.getItem('qs_ann_auto')) {
     sessionStorage.setItem('qs_ann_auto', '1');
     ModalQueue.enqueue(3, 'announcement', () => {
-      if ($('settingsDrawer').hidden && $('drawer').hidden && $('addDrawer').hidden) {
+      if (!$('settingsDialog')?.open && $('drawer').hidden && $('addDrawer').hidden) {
         openAnnouncements();
       }
     });

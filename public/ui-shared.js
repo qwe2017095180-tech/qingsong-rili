@@ -113,9 +113,12 @@ function renderGroupPickerHtml({
     ? '勾选游戏群、吃喝群、闲聊群，AI 会生成像真人群友复盘一样的省流群聊总结。'
     : '勾选班群、学院通知群、作业群等，AI 会自动提取截止时间和待办卡片。';
   return `
-    <div class="seg" id="${idPrefix}Mode">
-      <button type="button" class="${!isFun ? 'on' : ''}" data-gmode="notice" id="${idPrefix}NoticeTab">📚 通知群 (${noticeCount})</button>
-      <button type="button" class="${isFun ? 'on' : ''}" data-gmode="fun" id="${idPrefix}FunTab">🎮 娱乐群 (${funCount})</button>
+    <div class="picker-toolbar">
+      <div class="seg" id="${idPrefix}Mode">
+        <button type="button" class="${!isFun ? 'on' : ''}" data-gmode="notice" id="${idPrefix}NoticeTab">📚 通知群 (${noticeCount})</button>
+        <button type="button" class="${isFun ? 'on' : ''}" data-gmode="fun" id="${idPrefix}FunTab">🎮 娱乐群 (${funCount})</button>
+      </div>
+      <button type="button" class="btn ghost mirror-chip picker-refresh" id="${idPrefix}Refresh" title="重新从本地微信拉取最新群聊列表">🔄 刷新群聊</button>
     </div>
     <div class="s-desc picker-hint" id="${idPrefix}Hint">${hint}</div>
     <input class="s-input grp-search" id="${idPrefix}Search" placeholder="搜索群名或好友…" value="${esc(query)}" />
