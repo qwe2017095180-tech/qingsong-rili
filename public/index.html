@@ -273,6 +273,17 @@
 
     <!-- 第 2 步：接入 AI 模型 -->
     <section class="wizard-pane" id="wizardStep2" hidden>
+      <div class="wizard-card">
+        <div class="wizard-card-head">
+          <div>
+            <div class="wizard-card-title">AI 整理渠道连通性检测</div>
+            <div class="wizard-card-desc">需通过真实模型连接检测后才会进入下一步，确保配置立即可用。</div>
+          </div>
+          <button type="button" class="btn primary" id="recheckAiBtn">实测连接 AI</button>
+        </div>
+        <div class="diag-list" id="aiDiagList"></div>
+      </div>
+
       <div class="seg setup-tabs" id="setupModeTabs" role="tablist">
         <button type="button" class="on" data-setup-mode="apiKey">🔑 填入 API Key（默认 DeepSeek）</button>
         <button type="button" data-setup-mode="account">👤 账号登录（WorkBuddy）</button>
@@ -329,6 +340,15 @@
 
     <!-- 第 3 步：挑选要整理的群 -->
     <section class="wizard-pane" id="wizardStep3" hidden>
+      <div class="wizard-card">
+        <div class="wizard-card-head">
+          <div>
+            <div class="wizard-card-title">群聊与定时配置检测</div>
+            <div class="wizard-card-desc">至少勾选 1 个通知群或娱乐群，并确认自动整理时间有效后即可进入下一步。</div>
+          </div>
+        </div>
+        <div class="diag-list" id="groupDiagList"></div>
+      </div>
       <div class="wizard-card" id="wizardGroupPickerWrap"></div>
       <div class="wizard-card wizard-inline-grid">
         <label class="setup-field">
@@ -345,7 +365,13 @@
     <!-- 第 4 步：完成启用 -->
     <section class="wizard-pane" id="wizardStep4" hidden>
       <div class="wizard-card">
-        <div class="wizard-card-title" style="margin-bottom:10px">配置总览</div>
+        <div class="wizard-card-head">
+          <div>
+            <div class="wizard-card-title">全链路最终检测总览</div>
+            <div class="wizard-card-desc">全部 3 项检测通过后即可正式进入轻松日程主页面。</div>
+          </div>
+          <button type="button" class="btn ghost" id="recheckAllBtn">🔄 重新检测全部</button>
+        </div>
         <div class="summary-checklist" id="wizardSummaryList"></div>
       </div>
       <div class="wizard-card">
@@ -395,10 +421,10 @@
     <div class="update-mirror-box" id="updateMirrorBox" hidden>
       <div class="update-mirror-title">连接受阻？点选加速镜像并一键重试：</div>
       <div class="mirror-chips" id="updateDialogMirrors">
-        <button type="button" class="btn ghost mirror-chip" data-update-mirror="">直连 GitHub</button>
-        <button type="button" class="btn ghost mirror-chip" data-update-mirror="https://gh-proxy.com/">gh-proxy.com</button>
-        <button type="button" class="btn ghost mirror-chip" data-update-mirror="https://ghfast.top/">ghfast.top</button>
+        <button type="button" class="btn ghost mirror-chip" data-update-mirror="https://gh-proxy.com/">gh-proxy.com（默认）</button>
         <button type="button" class="btn ghost mirror-chip" data-update-mirror="https://gh-proxy.org/">gh-proxy.org</button>
+        <button type="button" class="btn ghost mirror-chip" data-update-mirror="https://ghfast.top/">ghfast.top</button>
+        <button type="button" class="btn ghost mirror-chip" data-update-mirror="direct">直连 GitHub</button>
       </div>
     </div>
     <div class="modal-footer update-actions">

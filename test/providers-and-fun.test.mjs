@@ -11,13 +11,13 @@ import {
   resolveOpenAIConfig,
 } from '../lib/providers.mjs';
 import { organizeByOpenAI, openaiReady } from '../lib/model-openai.mjs';
-import { backendStatus, pickBackend } from '../lib/workbuddy-model.mjs';
+import { backendStatus, pickBackend, resolveCliSpawn } from '../lib/workbuddy-model.mjs';
 import {
   prepareFunTranscript,
   summarizeFunWithModel,
 } from '../lib/fun-summary.mjs';
 import { wechatDiagnostics } from '../lib/wechat.mjs';
-import { detectLocalAgents } from '../lib/agents.mjs';
+import { detectLocalAgents, cleanLaunchEnv } from '../lib/agents.mjs';
 
 test('defaults to DeepSeek and triggers onboarding when unconfigured', () => {
   const prevDeepseek = process.env.DEEPSEEK_API_KEY;
@@ -235,4 +235,26 @@ test('detectLocalAgents finds agents dynamically on any macOS or Windows machine
   });
   const winInstalled = winRes.filter((a) => a.installed).map((a) => a.id).sort();
   assert.deepEqual(winInstalled, ['doubao', 'dsh', 'workbuddy']);
+});
+
+test('cleanLaunchEnv strips Electron/Node shim variables that break external GUI apps', () => {
+  const cleaned = cleanLaunchEnv({
+    PATH: '/usr/bin',
+    ELECTRON_RUN_AS_NODE: '1',
+    ELECTRON_NO_ATTACH_CONSOLE: '1',
+    NODE_OPTIONS: '--require foo.js',
+    SERVER__PORT: '61156',
+    USER: 'tester',
+  });
+  assert.equal(cleaned.ELECTRON_RUN_AS_NODE, undefined);
+  assert.equal(cleaned.ELECTRON_NO_ATTACH_CONSOLE, undefined);
+  assert.equal(cleaned.NODE_OPTIONS, undefined);
+  assert.equal(cleaned.SERVER__PORT, undefined);
+  assert.equal(cleaned.USER, 'tester');
+
+  const spec = resolveCliSpawn('C:\\WorkBuddy\\resources\\app.asar.unpacked\\cli\\bin\\codebuddy', ['--port', '0']);
+  assert.equal(spec.env.ELECTRON_RUN_AS_NODE, process.platform === 'win32' && !/node(\.exe)?$/i.test(path.basename(spec.command)) ? '1' : undefined);
+  if (process.platform === 'win32') {
+    assert.ok(spec.args[0].endsWith('codebuddy'));
+  }
 });

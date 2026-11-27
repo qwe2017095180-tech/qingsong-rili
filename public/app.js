@@ -300,32 +300,49 @@ async function api(path, opts = {}) {
 
 let prevRunning = false;
 let lastSeenRunId = null;   // 已提示过的整理批次；首次加载只记录不提示
+let lastSeenFunRunAt = null;
 
 function afterRun(data) {
   const running = Boolean(data.state?.running);
   prevRunning = running;
-  if (running) return;
-  const r = data.state?.lastResult;
-  if (!r || !r.runId) return;
-  // 首次加载：把当前结果记为已读，避免一进页面就弹上一次的提示
-  if (lastSeenRunId === null) { lastSeenRunId = r.runId; return; }
-  // 同一批次不重复提示（含页面自己触发的、定时触发的、外部触发的）
-  if (r.runId === lastSeenRunId) return;
-  lastSeenRunId = r.runId;
-  if (r.engine === 'none') {
-    toast(r.note || '整理完成，这段时间没有新内容');
-    return;
+  if (!running) {
+    const r = data.state?.lastResult;
+    if (r && r.runId) {
+      // 首次加载：把当前结果记为已读，避免一进页面就弹上一次的提示
+      if (lastSeenRunId === null) {
+        lastSeenRunId = r.runId;
+      } else if (r.runId !== lastSeenRunId) {
+        lastSeenRunId = r.runId;
+        if (r.engine === 'none') {
+          toast(r.note || '整理完成，这段时间没有新内容', 3600);
+        } else if (r.error) {
+          toast(r.error, 5000);
+        } else if ((r.items || 0) > 0) {
+          const isManualAdd = r.type === 'manual';
+          toast(isManualAdd
+            ? `整理完成 · ${r.items} 条待办已加入 🎉`
+            : `整理完成 · ${r.items} 条通知${r.added ? `（新增 ${r.added}）` : ''} 🎉`);
+          app.tab = isManualAdd ? 'todo' : 'all';
+          render();
+        } else {
+          toast(`整理完成 · 读了 ${r.totalMsgs || 0} 条消息，${r.note || '没有可整理的新通知'}`, 3600);
+        }
+      }
+    }
   }
-  if (r.error) {
-    toast(r.error, 5000);
-  }
-  if ((r.items || 0) > 0) {
-    const isManualAdd = r.type === 'manual';
-    toast(isManualAdd
-      ? `整理完成 · ${r.items} 条待办已加入 🎉`
-      : `整理完成 · ${r.items} 条通知${r.added ? `（新增 ${r.added}）` : ''} 🎉`);
-    app.tab = isManualAdd ? 'todo' : 'all';
-    render();
+
+  const fun = data.fun;
+  if (fun && !fun.running && fun.lastResult?.at) {
+    if (lastSeenFunRunAt === null) {
+      lastSeenFunRunAt = fun.lastResult.at;
+    } else if (fun.lastResult.at !== lastSeenFunRunAt) {
+      lastSeenFunRunAt = fun.lastResult.at;
+      if (fun.error) {
+        toast(fun.error, 5000);
+      } else {
+        toast(`娱乐群总结完成 · 已更新 ${fun.lastResult.ok || 0} 个群 🎉`, 3200);
+      }
+    }
   }
 }
 
@@ -488,7 +505,8 @@ function updateRunBar(state) {
   $('runText').textContent = phase || '正在整理…';
   let pct = 12;
   const m = String(phase || '').match(/(\d+)\s*\/\s*(\d+)/);
-  if (m) pct = 8 + (+m[1] / +m[2]) * 66;
+  if (m) pct = 22 + (+m[1] / +m[2]) * 52;
+  else if (/同步/.test(phase)) pct = 16;
   else if (/正在由|总结|WorkBuddy|分类整理|整理娱乐|正在整理/.test(phase)) pct = 78;
   else if (/保存/.test(phase)) pct = 94;
   $('runFill').style.width = pct + '%';
@@ -1104,13 +1122,13 @@ function renderSettings() {
         <div class="s-desc">当前版本 <strong>v${esc(env.version || '—')}</strong> · 每次打开应用都会自动检测新版本</div>
         <label class="inline-toggle"><input type="checkbox" id="autoCheckUpdate" /> 进入应用时自动检查更新</label>
         <div style="margin-top:12px">
-          <div class="s-desc" style="margin-bottom:6px">GitHub 下载加速镜像（留空直连，失败自动切换备用镜像）</div>
-          <input class="s-input" id="updateMirror" style="width:100%" placeholder="留空表示直连，例如 https://gh-proxy.com/" value="${esc(d.updateMirror || '')}" />
+          <div class="s-desc" style="margin-bottom:6px">更新加速镜像（macOS 与 Windows 默认走镜像加速，失败自动切换备用镜像或直连）</div>
+          <input class="s-input" id="updateMirror" style="width:100%" placeholder="默认 https://gh-proxy.com/（填 direct 为直连 GitHub）" value="${esc(d.updateMirror || 'https://gh-proxy.com/')}" />
           <div class="mirror-chips" id="updateMirrorChips">
-            <button type="button" class="btn ghost mirror-chip" data-mirror="">直连 GitHub</button>
-            <button type="button" class="btn ghost mirror-chip" data-mirror="https://gh-proxy.com/">gh-proxy.com</button>
-            <button type="button" class="btn ghost mirror-chip" data-mirror="https://ghfast.top/">ghfast.top</button>
+            <button type="button" class="btn ghost mirror-chip" data-mirror="https://gh-proxy.com/">gh-proxy.com（默认）</button>
             <button type="button" class="btn ghost mirror-chip" data-mirror="https://gh-proxy.org/">gh-proxy.org</button>
+            <button type="button" class="btn ghost mirror-chip" data-mirror="https://ghfast.top/">ghfast.top</button>
+            <button type="button" class="btn ghost mirror-chip" data-mirror="direct">直连 GitHub</button>
           </div>
         </div>
         <div class="ai-action-row">
@@ -1137,8 +1155,9 @@ function renderRunLog() {
   return runs.slice(0, 5).map((r) => {
     const t = new Date(r.at);
     const when = `${t.getMonth() + 1}/${t.getDate()} ${pad(t.getHours())}:${pad(t.getMinutes())}`;
-    if (r.engine === 'none') return `<div>${when} · 没有新消息</div>`;
-    return `<div>${when} · 读了 <b>${r.totalMsgs || 0}</b> 条，整理出 <b>${r.items || 0}</b> 条通知${r.added ? `（新增 ${r.added}）` : ''}</div>`;
+    if (r.error) return `<div>${when} · 失败：${esc(r.error)}</div>`;
+    if (r.engine === 'none') return `<div>${when} · ${esc(r.note || '没有新消息')}</div>`;
+    return `<div>${when} · 读了 <b>${r.totalMsgs || 0}</b> 条，整理出 <b>${r.items || 0}</b> 条通知${r.added ? `（新增 ${r.added}）` : ''}${!r.items && r.note ? ` · ${esc(r.note)}` : ''}</div>`;
   }).join('');
 }
 
@@ -1457,6 +1476,11 @@ $('mask').onclick = () => {
 };
 
 $('runBtn').onclick = async () => {
+  if (!app.data) {
+    toast('正在连接本地服务，请稍候再试…');
+    load({ quiet: true });
+    return;
+  }
   const ready = typeof isAiReady === 'function' ? isAiReady() : Boolean(app.data?.env?.ready || app.data?.env?.apiConfigured);
   if (!ready) {
     if (typeof openSetupDialog === 'function') {
@@ -1468,19 +1492,23 @@ $('runBtn').onclick = async () => {
     return;
   }
   const providerName = app.data.env?.providerName || 'DeepSeek';
-  if (app.mode === 'fun') {
-    if (!(app.data.settings.funGroups || []).length) { openSettings(); toast('先选几个娱乐群'); return; }
-    const res = await api('/api/fun/run', { method: 'POST' });
-    if (res.ok) { toast(`正在由 ${res.providerName || providerName} 总结娱乐群…`); load({ quiet: true }); }
+  try {
+    if (app.mode === 'fun') {
+      if (!(app.data.settings.funGroups || []).length) { openSettings(); toast('先选几个娱乐群'); return; }
+      const res = await api('/api/fun/run', { method: 'POST' });
+      if (res.ok) { toast(`正在由 ${res.providerName || providerName} 总结娱乐群…`); load({ quiet: true }); }
+      else if (res.needsSetup && typeof openSetupDialog === 'function') openSetupDialog({ reason: res.error });
+      else toast(res.error || '开始失败');
+      return;
+    }
+    if (!(app.data.settings.groups || []).length) { openSettings(); toast('先选几个要整理的群'); return; }
+    const res = await api('/api/run', { method: 'POST' });
+    if (res.ok) { toast(`正在由 ${res.providerName || providerName} 整理…`); load({ quiet: true }); }
     else if (res.needsSetup && typeof openSetupDialog === 'function') openSetupDialog({ reason: res.error });
     else toast(res.error || '开始失败');
-    return;
+  } catch (err) {
+    toast(err?.message || '触发整理失败，请检查本地服务是否正常', 4200);
   }
-  if (!app.data.settings.groups.length) { openSettings(); toast('先选几个要整理的群'); return; }
-  const res = await api('/api/run', { method: 'POST' });
-  if (res.ok) { toast(`正在由 ${res.providerName || providerName} 整理…`); load({ quiet: true }); }
-  else if (res.needsSetup && typeof openSetupDialog === 'function') openSetupDialog({ reason: res.error });
-  else toast(res.error || '开始失败');
 };
 
 $('settingsBtn').onclick = openSettings;
@@ -1686,10 +1714,11 @@ async function loadAnnouncements() {
   updateAnnDot();
   renderAnnouncements();
 
-  // 有新内容时通过 ModalQueue 排队居中展示（优先让位给更新弹窗和首次配置向导）
+  // 有新内容时通过 ModalQueue 排队居中展示（优先让位给首次强制配置向导和更新弹窗）
   if (annHasUnseen() && !sessionStorage.getItem('qs_ann_auto')) {
     sessionStorage.setItem('qs_ann_auto', '1');
     ModalQueue.enqueue(3, 'announcement', () => {
+      if (document.body.classList.contains('onboarding-locked')) return;
       if (!$('settingsDialog')?.open && $('drawer').hidden && $('addDrawer').hidden) {
         openAnnouncements();
       }

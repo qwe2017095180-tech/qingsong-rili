@@ -5,6 +5,8 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  DEFAULT_UPDATE_MIRROR,
+  DIRECT_MIRROR_SENTINEL,
   applyMirrorPrefix,
   createUpdater,
   formatNetworkError,
@@ -44,7 +46,7 @@ function setup(t) {
 
   const updater = createUpdater(install, '1.2.0', async () => Response.json({
     tag_name: 'v1.3.0', draft: false, prerelease: false, body: '发布日期',
-  }), { retryDelayMs: 0, fallbackMirrors: [] });
+  }), { retryDelayMs: 0, getMirror: () => DIRECT_MIRROR_SENTINEL, fallbackMirrors: [] });
   return { dir, remote, install, publish, updater };
 }
 
@@ -90,7 +92,7 @@ test('retries transient release check failure and formats network errors cleanly
     calls++;
     if (calls === 1) throw new TypeError('fetch failed');
     return Response.json({ tag_name: 'v1.3.2', draft: false, prerelease: false, body: '修复断流' });
-  }, { retryDelayMs: 0, maxAttempts: 2 });
+  }, { retryDelayMs: 0, maxAttempts: 2, getMirror: () => DIRECT_MIRROR_SENTINEL, fallbackMirrors: [] });
 
   const res = await updater.check();
   assert.equal(calls, 2);
@@ -98,15 +100,20 @@ test('retries transient release check failure and formats network errors cleanly
   assert.equal(res.latest, '1.3.2');
 
   assert.equal(normalizeMirrorPrefix('https://gh-proxy.com'), 'https://gh-proxy.com/');
+  assert.equal(normalizeMirrorPrefix('direct'), DIRECT_MIRROR_SENTINEL);
   assert.equal(normalizeMirrorPrefix('not-a-url'), '');
   assert.equal(
     applyMirrorPrefix('https://github.com/a/b.git', 'https://gh-proxy.com'),
     'https://gh-proxy.com/https://github.com/a/b.git',
   );
-  assert.match(formatNetworkError(new Error('fetch failed https://secret.example/x?jwt=123')), /无法连接 GitHub/);
+  assert.equal(
+    applyMirrorPrefix('https://github.com/a/b.git', 'direct'),
+    'https://github.com/a/b.git',
+  );
+  assert.match(formatNetworkError(new Error('fetch failed https://secret.example/x?jwt=123')), /无法连接更新源/);
 });
 
-test('falls back to mirror remote when direct git fetch fails', async (t) => {
+test('uses mirror by default for both release checks and git fetch on all platforms', async (t) => {
   const { remote, install, publish } = setup(t);
   publish();
   const git = (cwd, ...args) => execFileSync('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -115,17 +122,28 @@ test('falls back to mirror remote when direct git fetch fails', async (t) => {
   git(install, 'config', 'url.file:///nonexistent-qingsong-repo.insteadOf', 'https://github.com/qwe2017095180-tech/qingsong-rili.git');
   git(install, 'config', `url.${remote}.insteadOf`, 'https://mirror.example/https://github.com/qwe2017095180-tech/qingsong-rili.git');
 
-  const updater = createUpdater(install, '1.2.0', async () => Response.json({
-    tag_name: 'v1.3.0', draft: false, prerelease: false, body: '镜像回退测试',
-  }), {
+  const seenUrls = [];
+  const updater = createUpdater(install, '1.2.0', async (url) => {
+    seenUrls.push(url);
+    assert.ok(url.startsWith('https://mirror.example/https://raw.githubusercontent.com/'));
+    return Response.json({ version: '1.3.0', notes: '默认镜像优先测试' });
+  }, {
     retryDelayMs: 0,
     maxAttempts: 1,
+    getMirror: () => 'https://mirror.example/',
     fallbackMirrors: ['https://mirror.example/'],
   });
 
+  // 确认默认候选顺序是镜像在前、直连在后
+  const remotes = updater.candidateRemotes();
+  assert.ok(remotes[0].startsWith('https://mirror.example/'));
+  assert.ok(remotes[remotes.length - 1].startsWith('https://github.com/'));
+
   const result = await updater.install('v1.3.0');
   assert.equal(result.restartRequired, true);
+  assert.equal(seenUrls.length, 1);
   assert.equal(readFileSync(path.join(install, 'version.json'), 'utf8'), '{"version":"1.3.0"}');
+  assert.equal(DEFAULT_UPDATE_MIRROR, 'https://gh-proxy.com/');
 });
 
 test('falls back to web release redirect when GitHub API returns 403 rate limit', async () => {
@@ -145,7 +163,7 @@ test('falls back to web release redirect when GitHub API returns 403 rate limit'
       return Response.json({ version: '1.3.2', notes: '绕过 API 限流检查更新' });
     }
     throw new Error(`unexpected url: ${url}`);
-  }, { retryDelayMs: 0, maxAttempts: 1 });
+  }, { retryDelayMs: 0, maxAttempts: 1, getMirror: () => DIRECT_MIRROR_SENTINEL, fallbackMirrors: [] });
 
   const res = await updater.check();
   assert.equal(res.hasUpdate, true);
@@ -164,7 +182,7 @@ test('web fallback returns no update when repository redirects to /releases with
       status: 302,
       headers: { location: 'https://github.com/qwe2017095180-tech/qingsong-rili/releases' },
     });
-  }, { retryDelayMs: 0, maxAttempts: 1 });
+  }, { retryDelayMs: 0, maxAttempts: 1, getMirror: () => DIRECT_MIRROR_SENTINEL, fallbackMirrors: [] });
 
   assert.deepEqual(await updater.check(), { current: '1.3.2', latest: null, hasUpdate: false });
 });

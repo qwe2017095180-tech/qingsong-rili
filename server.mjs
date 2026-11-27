@@ -7,14 +7,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { store, cryptoId, norm, textSim } from './lib/store.mjs';
-import { listChats, readChat, messagesToText, wechatReady, wechatDiagnostics } from './lib/wechat.mjs';
-import { organizeWithModel, backendStatus, checkBackend, workbuddyCli } from './lib/workbuddy-model.mjs';
+import { listChats, readChat, messagesToText, wechatReady, wechatDiagnostics, syncWechatWindows } from './lib/wechat.mjs';
+import { organizeWithModel, backendStatus, checkBackend, workbuddyCli, isWindowsNodeScript } from './lib/workbuddy-model.mjs';
 import { summarizeFunWithModel } from './lib/fun-summary.mjs';
 import { activeProviderId, getProvider, isValidProviderId } from './lib/providers.mjs';
 import { pending, recent, complete } from './lib/queue.mjs';
 import { initBridge, bridgeInfo, setBridgeEnabled, resetToken, createAgendaNotices } from './lib/bridge.mjs';
 import { createUpdater, normalizeMirrorPrefix } from './lib/update.mjs';
-import { detectLocalAgents } from './lib/agents.mjs';
+import { detectLocalAgents, cleanLaunchEnv, launchLocalAgent } from './lib/agents.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, 'public');
@@ -48,18 +48,19 @@ function readVersion() {
 
 const runningVersion = readVersion().version;
 const updater = createUpdater(__dirname, runningVersion, fetch, {
-  getMirror: () => store.settings.updateMirror || '',
+  getMirror: () => store.settings.updateMirror || 'https://gh-proxy.com/',
 });
 
 /** 跨平台打开浏览器：macOS 用 open，Windows 用 start，Linux 用 xdg-open */
 function openUrl(url) {
   try {
+    const env = cleanLaunchEnv();
     if (process.platform === 'win32') {
-      spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+      spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore', env, windowsHide: true }).unref();
     } else if (process.platform === 'darwin') {
-      spawn('open', [url], { detached: true, stdio: 'ignore' }).unref();
+      spawn('open', [url], { detached: true, stdio: 'ignore', env }).unref();
     } else {
-      spawn('xdg-open', [url], { detached: true, stdio: 'ignore' }).unref();
+      spawn('xdg-open', [url], { detached: true, stdio: 'ignore', env }).unref();
     }
   } catch {}
 }
@@ -128,6 +129,10 @@ async function runOrganize({ trigger = 'manual' } = {}) {
   state.startedAt = startedAt;
 
   try {
+    if (process.platform === 'win32') {
+      state.phase = '正在同步本地微信数据库…';
+      await syncWechatWindows({ coreOnly: true });
+    }
     const hours = Number(store.settings.lookbackHours) || 24;
     state.phase = `读取微信消息… (0/${groups.length})`;
     const chats = await readGroupChats(groups, hours, (d, n) => {
@@ -198,6 +203,10 @@ async function runFun() {
   state.funPhase = '读取娱乐群消息…';
   const startedAt = Date.now();
   try {
+    if (process.platform === 'win32') {
+      state.funPhase = '正在同步本地微信数据库…';
+      await syncWechatWindows({ coreOnly: true });
+    }
     const hours = Number(store.settings.lookbackHours) || 24;
     const sinceMs = Date.now() - hours * 3600 * 1000;
     const chats = await readGroupChats(groups, hours, (d, n) => { state.funPhase = `读取娱乐群消息… (${d}/${n})`; });
@@ -496,15 +505,32 @@ const server = http.createServer(async (req, res) => {
         return send(res, 400, { ok: false, error: '本机未检测到 WorkBuddy 命令行，可先安装 WorkBuddy 或直接填写 DeepSeek API Key' });
       }
       try {
+        const env = cleanLaunchEnv();
         if (process.platform === 'darwin') {
           const cmd = path.join(__dirname, 'workbuddy-login.command');
           if (fs.existsSync(cmd)) {
-            spawn('open', [cmd], { detached: true, stdio: 'ignore' }).unref();
+            spawn('open', [cmd], { detached: true, stdio: 'ignore', env }).unref();
           } else {
-            spawn('open', ['-a', 'Terminal', cli], { detached: true, stdio: 'ignore' }).unref();
+            spawn('open', ['-a', 'Terminal', cli], { detached: true, stdio: 'ignore', env }).unref();
           }
         } else if (process.platform === 'win32') {
-          spawn('cmd', ['/c', 'start', '', cli, '--port', '0'], { detached: true, stdio: 'ignore', windowsHide: false }).unref();
+          if (isWindowsNodeScript(cli)) {
+            // 无后缀 Node 脚本在 Windows 需经 node 启动，避免系统弹出「选择打开方式」
+            const nodeCmd = /node(\.exe)?$/i.test(path.basename(process.execPath)) ? process.execPath : 'node';
+            spawn('cmd.exe', ['/c', 'start', 'WorkBuddy 登录', 'cmd.exe', '/k', nodeCmd, cli, '--port', '0'], {
+              detached: true,
+              stdio: 'ignore',
+              env,
+              windowsHide: false,
+            }).unref();
+          } else {
+            spawn('cmd.exe', ['/c', 'start', 'WorkBuddy 登录', 'cmd.exe', '/k', cli, '--port', '0'], {
+              detached: true,
+              stdio: 'ignore',
+              env,
+              windowsHide: false,
+            }).unref();
+          }
         } else {
           return send(res, 200, { ok: true, manual: true, message: `请在终端运行 ${cli} --port 0 并输入 /login 完成授权` });
         }
@@ -548,13 +574,7 @@ const server = http.createServer(async (req, res) => {
         return send(res, 400, { ok: false, error: `本机未检测到 ${agent.name}，已将配置指令复制到剪贴板，可手动粘贴到任意 AI 助手` });
       }
       try {
-        if (process.platform === 'darwin') {
-          spawn('open', ['-a', agent.appPath], { detached: true, stdio: 'ignore' }).unref();
-        } else if (process.platform === 'win32') {
-          spawn('cmd', ['/c', 'start', '', agent.appPath], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
-        } else {
-          return send(res, 400, { ok: false, error: '当前系统请手动打开对应助手粘贴指令' });
-        }
+        launchLocalAgent(agent);
         return send(res, 200, { ok: true, name: agent.name });
       } catch (e) {
         return send(res, 500, { ok: false, error: `打开 ${agent.name} 失败：${e.message}` });
@@ -571,6 +591,9 @@ const server = http.createServer(async (req, res) => {
         });
       }
       try {
+        if (process.platform === 'win32') {
+          await syncWechatWindows({ coreOnly: true }).catch(() => {});
+        }
         const chats = await listChats();
         const groupCount = chats.filter((c) => c.isGroup).length;
         const friendCount = chats.filter((c) => c.isFriend).length;
@@ -592,6 +615,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/groups' && req.method === 'POST') {
+      if (process.platform === 'win32') {
+        await syncWechatWindows({ coreOnly: true }).catch(() => {});
+      }
       const chats = await listChats();
       return send(res, 200, { chats });
     }

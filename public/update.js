@@ -108,7 +108,7 @@ async function checkForAppUpdate({ silent = false } = {}) {
   updateNotes.textContent = '';
 
   if (!silent) {
-    setUpdateStatus('正在从 GitHub 检查最新版本…');
+    setUpdateStatus('正在通过加速镜像检查最新版本…');
     updateProgress.hidden = false;
     updateDialog.showModal();
   }
@@ -144,6 +144,7 @@ async function checkForAppUpdate({ silent = false } = {}) {
 
     if (silent) {
       ModalQueue.enqueue(1, 'update', () => {
+        if (document.body.classList.contains('onboarding-locked')) return;
         if (updateDialog.open) return;
         resetUpdateModalChrome();
         populateAvailableRelease(result, { allowIgnore: true });
@@ -183,8 +184,8 @@ async function installAppUpdate(tag, { mirror } = {}) {
   updateProgress.hidden = false;
   updateBadge.textContent = '正在更新';
   setUpdateStatus(mirror !== undefined
-    ? `正在通过 ${mirror || '直连'} 下载并安装…`
-    : '正在下载更新并校验本地数据安全（如直连中断会自动切换镜像重试）…');
+    ? `正在通过 ${mirror === 'direct' ? '直连 GitHub' : (mirror || '默认镜像')} 下载并安装…`
+    : '正在通过加速镜像下载更新并校验本地数据安全（失败会自动切换备用镜像或直连）…');
 
   try {
     const payload = mirror !== undefined ? { tag, mirror } : { tag };
@@ -226,7 +227,10 @@ updateDialog?.addEventListener('cancel', (event) => {
 });
 ModalQueue.bindBackdropClose(updateDialog, { canClose: () => !installingUpdate });
 
-// 每次进入应用自动检查新版本（受「进入应用时自动检查更新」开关控制）
+// 每次进入应用自动检查新版本（受「进入应用时自动检查更新」开关控制；首次引导完成前不打断）
 if (localStorage.getItem(UPDATE_AUTO_KEY) !== 'off') {
-  setTimeout(() => checkForAppUpdate({ silent: true }), 300);
+  setTimeout(() => {
+    if (document.body.classList.contains('onboarding-locked') || app.data?.settings?.onboardingDone === false) return;
+    checkForAppUpdate({ silent: true });
+  }, 800);
 }
