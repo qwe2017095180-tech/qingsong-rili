@@ -7,9 +7,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { store, cryptoId, norm, textSim } from './lib/store.mjs';
-import { listChats, readChat, messagesToText, wechatReady } from './lib/wechat.mjs';
-import { organizeWithModel, backendStatus } from './lib/workbuddy-model.mjs';
-import { summarizeFun } from './lib/fun-summary.mjs';
+import { listChats, readChat, messagesToText, wechatReady, wechatDiagnostics } from './lib/wechat.mjs';
+import { organizeWithModel, backendStatus, checkBackend, workbuddyCli } from './lib/workbuddy-model.mjs';
+import { summarizeFunWithModel } from './lib/fun-summary.mjs';
+import { activeProviderId, getProvider, isValidProviderId } from './lib/providers.mjs';
 import { pending, recent, complete } from './lib/queue.mjs';
 import { initBridge, bridgeInfo, setBridgeEnabled, resetToken, createAgendaNotices } from './lib/bridge.mjs';
 import { createUpdater, normalizeMirrorPrefix } from './lib/update.mjs';
@@ -30,7 +31,7 @@ const state = {
   funLastResult: null,
 };
 
-const PORT_START = 7788;
+const PORT_START = Number(process.env.PORT) || 7788;
 
 function dayKey(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -48,6 +49,81 @@ const runningVersion = readVersion().version;
 const updater = createUpdater(__dirname, runningVersion, fetch, {
   getMirror: () => store.settings.updateMirror || '',
 });
+
+/** 探测本机已安装的常见 AI Agent 桌面软件（用于一键唤起协助配置本地微信） */
+function detectLocalAgents() {
+  const isMac = process.platform === 'darwin';
+  const isWin = process.platform === 'win32';
+  const home = process.env.HOME || '';
+  const localApp = process.env.LOCALAPPDATA || '';
+  const defs = [
+    {
+      id: 'workbuddy',
+      name: 'WorkBuddy',
+      desc: '直接执行命令帮配好',
+      macPaths: ['/Applications/WorkBuddy AI.app', '/Applications/WorkBuddy.app'],
+      winPaths: [
+        localApp && path.join(localApp, 'Programs', 'WorkBuddy', 'WorkBuddy.exe'),
+        localApp && path.join(localApp, 'Programs', 'WorkBuddy AI', 'WorkBuddy AI.exe'),
+      ],
+    },
+    {
+      id: 'dsh',
+      name: 'DeepSeek Harness',
+      desc: 'DSH 桌面助手',
+      macPaths: ['/Applications/DeepSeek Harness.app'],
+      winPaths: [localApp && path.join(localApp, 'Programs', 'DeepSeek Harness', 'DeepSeek Harness.exe')],
+    },
+    {
+      id: 'doubao',
+      name: '豆包',
+      desc: '字节豆包桌面端',
+      macPaths: ['/Applications/Doubao.app', '/Applications/豆包.app'],
+      winPaths: [localApp && path.join(localApp, 'Doubao', 'Doubao.exe')],
+    },
+    {
+      id: 'antigravity',
+      name: 'Antigravity',
+      desc: '本地开发 Agent',
+      macPaths: ['/Applications/Antigravity.app'],
+      winPaths: [],
+    },
+    {
+      id: 'chatgpt',
+      name: 'ChatGPT',
+      desc: 'OpenAI 桌面端',
+      macPaths: ['/Applications/ChatGPT.app'],
+      winPaths: [],
+    },
+    {
+      id: 'cursor',
+      name: 'Cursor',
+      desc: 'AI 编程助手',
+      macPaths: ['/Applications/Cursor.app', home && path.join(home, 'Applications', 'Cursor.app')],
+      winPaths: [localApp && path.join(localApp, 'Programs', 'cursor', 'Cursor.exe')],
+    },
+    {
+      id: 'claude',
+      name: 'Claude',
+      desc: 'Anthropic 桌面端',
+      macPaths: ['/Applications/Claude.app'],
+      winPaths: [localApp && path.join(localApp, 'AnthropicClaude', 'claude.exe')],
+    },
+  ];
+  return defs.map((d) => {
+    const candidates = (isMac ? d.macPaths : (isWin ? d.winPaths : [])).filter(Boolean);
+    const appPath = candidates.find((p) => {
+      try { return fs.existsSync(p); } catch { return false; }
+    }) || null;
+    return {
+      id: d.id,
+      name: d.name,
+      desc: d.desc,
+      installed: Boolean(appPath),
+      appPath,
+    };
+  });
+}
 
 /** 跨平台打开浏览器：macOS 用 open，Windows 用 start，Linux 用 xdg-open */
 function openUrl(url) {
@@ -113,6 +189,11 @@ async function runOrganize({ trigger = 'manual' } = {}) {
     state.error = '还没有选择要整理的群，先去「设置」里勾选。';
     return;
   }
+  const b = backendStatus(store.settings);
+  if (!b.ready) {
+    state.error = `还没有配置整理渠道（当前为 ${b.providerName}），请先填入 API Key 或完成账号登录。`;
+    return;
+  }
   state.running = true;
   state.phase = '准备读取微信消息…';
   state.error = null;
@@ -134,7 +215,7 @@ async function runOrganize({ trigger = 'manual' } = {}) {
       return;
     }
 
-    state.phase = '正在由 WorkBuddy 整理…';
+    state.phase = `正在由 ${b.providerName} 整理…`;
     const packed = messagesToText(chats.filter((c) => c.messages.length), { maxCharsPerGroup: 12000 });
     let dismissed = [];
     try {
@@ -161,7 +242,7 @@ async function runOrganize({ trigger = 'manual' } = {}) {
       : { added: 0, updated: 0 };
     finishRun({
       runId, trigger, totalMsgs, items: fresh.length, added, updated,
-      engine: 'workbuddy',
+      engine: b.provider,
       note: fresh.length ? null : '这段时间没有可整理的新通知',
       groups: groups.length, failedGroups,
       durationMs: Date.now() - startedAt,
@@ -172,11 +253,16 @@ async function runOrganize({ trigger = 'manual' } = {}) {
   }
 }
 
-// ── 娱乐群整理：同步跑完 ──────────────────────────────────
+// ── 娱乐群整理：调用模型逐群生成自然流畅的群聊总结 ────────
 async function runFun() {
   if (state.funRunning) return;
   const groups = store.settings.funGroups || [];
   if (!groups.length) { state.funError = '还没有选择娱乐群，先去设置里勾选。'; return; }
+  const b = backendStatus(store.settings);
+  if (!b.ready) {
+    state.funError = `还没有配置 AI 整理渠道（当前为 ${b.providerName}），请先填入 API Key 或完成账号登录。`;
+    return;
+  }
   state.funRunning = true;
   state.funError = null;
   state.funPhase = '读取娱乐群消息…';
@@ -186,17 +272,39 @@ async function runFun() {
     const sinceMs = Date.now() - hours * 3600 * 1000;
     const chats = await readGroupChats(groups, hours, (d, n) => { state.funPhase = `读取娱乐群消息… (${d}/${n})`; });
     let ok = 0;
-    for (const c of chats) {
-      const msgs = c.messages.filter((m) => m._ts * 1000 >= sinceMs);
-      const fresh = summarizeFun(msgs);
-      const prev = store.funItems.find((x) => x.group === c.name);
-      if (prev && prev.curated && prev.summary) {
-        // 已经由 WorkBuddy 会话写好的总结：点整理只更新消息数，绝不用原文把它冲掉
-        store.upsertFunGroup({ group: c.name, messageCount: fresh.messageCount, updatedAt: Date.now() });
-      } else {
-        store.upsertFunGroup({ group: c.name, ...fresh, updatedAt: Date.now() });
+    let done = 0;
+    const errors = [];
+    const queue = [...chats];
+    const now = new Date();
+
+    async function summarizeWorker() {
+      while (queue.length) {
+        const c = queue.shift();
+        const msgs = c.messages.filter((m) => m._ts * 1000 >= sinceMs);
+        state.funPhase = `正在由 ${b.providerName} 总结「${c.name}」… (${done + 1}/${chats.length})`;
+        try {
+          const fresh = await summarizeFunWithModel({
+            groupName: c.name,
+            messages: msgs,
+            hours,
+            now,
+            settings: store.settings,
+          });
+          store.upsertFunGroup({ group: c.name, ...fresh, updatedAt: Date.now() });
+          ok++;
+        } catch (e) {
+          errors.push(`「${c.name}」${e.message}`);
+        }
+        done++;
       }
-      ok++;
+    }
+
+    await Promise.all(Array.from({ length: Math.min(2, chats.length) }, summarizeWorker));
+    if (errors.length && ok === 0) {
+      throw new Error(errors[0]);
+    }
+    if (errors.length) {
+      state.funError = `部分群总结失败：${errors.join('；')}`;
     }
     store.settings.funLastRunAt = Date.now();
     store.saveSettings();
@@ -300,11 +408,17 @@ const server = http.createServer(async (req, res) => {
           const b = backendStatus(store.settings);
           return {
             wechatReady: wechatReady(),
-            aiAvailable: b.backend !== 'none',
+            aiAvailable: b.ready,
             aiEnabled: true,
             ocrAvailable: false,
             engine: b.backend,
             backend: b.backend,
+            provider: b.provider,
+            providerName: b.providerName,
+            providerFullName: b.providerFullName,
+            ready: b.ready,
+            needsOnboarding: b.needsOnboarding,
+            providers: b.providers,
             workbuddyCli: b.workbuddyCli,
             apiConfigured: b.apiConfigured,
             deepseekConfigured: b.deepseekConfigured,
@@ -342,6 +456,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/settings' && req.method === 'POST') {
+      store.reloadSettings();
       const body = await readBody(req);
       const s = store.settings;
       if (Array.isArray(body.times)) {
@@ -360,15 +475,41 @@ const server = http.createServer(async (req, res) => {
       if (typeof body.ocrImages === 'boolean') s.ocrImages = body.ocrImages;
       if (typeof body.organizeBackend === 'string') {
         s.organizeBackend = ['auto', 'workbuddy', 'openai', 'deepseek', 'queue', 'none'].includes(body.organizeBackend)
-          ? body.organizeBackend : 'auto';
+          ? body.organizeBackend : 'deepseek';
       }
+      if (typeof body.aiProvider === 'string' && isValidProviderId(body.aiProvider)) {
+        const pid = body.aiProvider.trim().toLowerCase();
+        s.aiProvider = pid;
+        s.organizeBackend = pid === 'workbuddy' ? 'workbuddy' : (pid === 'deepseek' ? 'deepseek' : 'openai');
+      }
+      if (typeof body.onboardingDone === 'boolean') s.onboardingDone = body.onboardingDone;
       if (typeof body.apiBaseUrl === 'string') s.apiBaseUrl = body.apiBaseUrl.trim().slice(0, 300);
       if (typeof body.apiKey === 'string') s.apiKey = body.apiKey.trim().slice(0, 300);
-      if (typeof body.apiModel === 'string') s.apiModel = body.apiModel.trim().slice(0, 80);
+      if (typeof body.apiModel === 'string') s.apiModel = body.apiModel.trim().slice(0, 120);
       // 兼容旧字段
       if (typeof body.deepseekApiKey === 'string') s.apiKey = body.deepseekApiKey.trim().slice(0, 300);
-      if (typeof body.deepseekModel === 'string') s.apiModel = body.deepseekModel.trim().slice(0, 80);
+      if (typeof body.deepseekModel === 'string') s.apiModel = body.deepseekModel.trim().slice(0, 120);
       if (typeof body.deepseekBaseUrl === 'string') s.apiBaseUrl = body.deepseekBaseUrl.trim().slice(0, 300);
+      // 同步保存到按渠道商隔离的 profile，切换渠道商时保留各家 Key 与模型名
+      if (!s.providerProfiles || typeof s.providerProfiles !== 'object') s.providerProfiles = {};
+      const activePid = activeProviderId(s);
+      const touchedProviderConfig =
+        typeof body.aiProvider === 'string' ||
+        typeof body.apiKey === 'string' ||
+        typeof body.deepseekApiKey === 'string' ||
+        typeof body.apiBaseUrl === 'string' ||
+        typeof body.apiModel === 'string';
+      if (touchedProviderConfig && activePid !== 'workbuddy') {
+        const pMeta = getProvider(activePid);
+        const prevProfile = s.providerProfiles[activePid] || {};
+        s.providerProfiles[activePid] = {
+          apiKey: typeof body.apiKey === 'string' || typeof body.deepseekApiKey === 'string'
+            ? (s.apiKey || '')
+            : (prevProfile.apiKey || s.apiKey || ''),
+          baseUrl: s.apiBaseUrl || prevProfile.baseUrl || pMeta.baseUrl || '',
+          model: s.apiModel || prevProfile.model || pMeta.defaultModel || '',
+        };
+      }
       if (typeof body.termStart === 'string' || body.termStart === null) {
         s.termStart = body.termStart && /^\d{4}-\d{2}-\d{2}$/.test(body.termStart) ? body.termStart : null;
       }
@@ -376,7 +517,148 @@ const server = http.createServer(async (req, res) => {
         s.updateMirror = normalizeMirrorPrefix(body.updateMirror.slice(0, 200));
       }
       store.saveSettings();
-      return send(res, 200, { ok: true, settings: s });
+      return send(res, 200, { ok: true, settings: s, env: backendStatus(s) });
+    }
+
+    if (p === '/api/ai/test' && req.method === 'POST') {
+      const origin = req.headers.origin;
+      const port = req.socket.localPort;
+      if (origin && ![`http://127.0.0.1:${port}`, `http://localhost:${port}`].includes(origin)) {
+        return send(res, 403, { ok: false, error: '请从轻松日程页面测试连接' });
+      }
+      const body = await readBody(req);
+      const pid = isValidProviderId(body.aiProvider) ? body.aiProvider.toLowerCase() : activeProviderId(store.settings);
+      const pMeta = getProvider(pid);
+      const testSettings = {
+        ...store.settings,
+        aiProvider: pid,
+        organizeBackend: pid === 'workbuddy' ? 'workbuddy' : (pid === 'deepseek' ? 'deepseek' : 'openai'),
+        apiBaseUrl: typeof body.apiBaseUrl === 'string' ? body.apiBaseUrl.trim() : (pMeta.baseUrl || store.settings.apiBaseUrl),
+        apiKey: typeof body.apiKey === 'string' ? body.apiKey.trim() : store.settings.apiKey,
+        apiModel: typeof body.apiModel === 'string' ? body.apiModel.trim() : (pMeta.defaultModel || store.settings.apiModel),
+        providerProfiles: {
+          ...(store.settings.providerProfiles || {}),
+          ...(pid !== 'workbuddy' ? {
+            [pid]: {
+              apiKey: typeof body.apiKey === 'string' ? body.apiKey.trim() : (store.settings.providerProfiles?.[pid]?.apiKey || store.settings.apiKey || ''),
+              baseUrl: typeof body.apiBaseUrl === 'string' ? body.apiBaseUrl.trim() : (store.settings.providerProfiles?.[pid]?.baseUrl || pMeta.baseUrl || ''),
+              model: typeof body.apiModel === 'string' ? body.apiModel.trim() : (store.settings.providerProfiles?.[pid]?.model || pMeta.defaultModel || ''),
+            },
+          } : {}),
+        },
+      };
+      try {
+        const result = await checkBackend(testSettings);
+        return send(res, 200, { ok: true, ...result });
+      } catch (e) {
+        return send(res, 400, { ok: false, error: e.message });
+      }
+    }
+
+    if (p === '/api/ai/workbuddy-login' && req.method === 'POST') {
+      const origin = req.headers.origin;
+      const port = req.socket.localPort;
+      if (![`http://127.0.0.1:${port}`, `http://localhost:${port}`].includes(origin)) {
+        return send(res, 403, { ok: false, error: '请从轻松日程页面启动登录' });
+      }
+      const cli = workbuddyCli();
+      if (!cli) {
+        return send(res, 400, { ok: false, error: '本机未检测到 WorkBuddy 命令行，可先安装 WorkBuddy 或直接填写 DeepSeek API Key' });
+      }
+      try {
+        if (process.platform === 'darwin') {
+          const cmd = path.join(__dirname, 'workbuddy-login.command');
+          if (fs.existsSync(cmd)) {
+            spawn('open', [cmd], { detached: true, stdio: 'ignore' }).unref();
+          } else {
+            spawn('open', ['-a', 'Terminal', cli], { detached: true, stdio: 'ignore' }).unref();
+          }
+        } else if (process.platform === 'win32') {
+          spawn('cmd', ['/c', 'start', '', cli, '--port', '0'], { detached: true, stdio: 'ignore', windowsHide: false }).unref();
+        } else {
+          return send(res, 200, { ok: true, manual: true, message: `请在终端运行 ${cli} --port 0 并输入 /login 完成授权` });
+        }
+        return send(res, 200, { ok: true, message: '已打开登录终端，输入 /login 回车并在浏览器完成授权后，回来点击「测试连接」即可' });
+      } catch (e) {
+        return send(res, 500, { ok: false, error: `启动登录窗口失败：${e.message}` });
+      }
+    }
+
+    if (p === '/api/setup/diagnostics' && req.method === 'GET') {
+      store.reloadSettings();
+      const wx = wechatDiagnostics();
+      const ai = backendStatus(store.settings);
+      const groupsCount = (store.settings.groups || []).length;
+      const funGroupsCount = (store.settings.funGroups || []).length;
+      return send(res, 200, {
+        ok: true,
+        projectDir: __dirname,
+        wechat: wx,
+        ai,
+        agents: detectLocalAgents().map(({ id, name, desc, installed }) => ({ id, name, desc, installed })),
+        groups: {
+          noticeCount: groupsCount,
+          funCount: funGroupsCount,
+          ready: groupsCount > 0 || funGroupsCount > 0,
+        },
+        bridge: bridgeInfo(),
+      });
+    }
+
+    if (p === '/api/setup/open-agent' && req.method === 'POST') {
+      const origin = req.headers.origin;
+      const port = req.socket.localPort;
+      if (![`http://127.0.0.1:${port}`, `http://localhost:${port}`].includes(origin)) {
+        return send(res, 403, { ok: false, error: '请从轻松日程页面唤起助手' });
+      }
+      const { agentId } = await readBody(req);
+      const agent = detectLocalAgents().find((a) => a.id === String(agentId || '').toLowerCase());
+      if (!agent) return send(res, 404, { ok: false, error: '未知的助手应用' });
+      if (!agent.installed || !agent.appPath) {
+        return send(res, 400, { ok: false, error: `本机未检测到 ${agent.name}，已将配置指令复制到剪贴板，可手动粘贴到任意 AI 助手` });
+      }
+      try {
+        if (process.platform === 'darwin') {
+          spawn('open', ['-a', agent.appPath], { detached: true, stdio: 'ignore' }).unref();
+        } else if (process.platform === 'win32') {
+          spawn('cmd', ['/c', 'start', '', agent.appPath], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+        } else {
+          return send(res, 400, { ok: false, error: '当前系统请手动打开对应助手粘贴指令' });
+        }
+        return send(res, 200, { ok: true, name: agent.name });
+      } catch (e) {
+        return send(res, 500, { ok: false, error: `打开 ${agent.name} 失败：${e.message}` });
+      }
+    }
+
+    if (p === '/api/setup/test-wechat' && req.method === 'POST') {
+      const wx = wechatDiagnostics();
+      if (!wx.ready) {
+        return send(res, 400, {
+          ok: false,
+          error: '未找到微信读取环境（.venv 或 query.py 缺失），请按下方对应系统教程完成安装后重试',
+          wechat: wx,
+        });
+      }
+      try {
+        const chats = await listChats();
+        const groupCount = chats.filter((c) => c.isGroup).length;
+        const friendCount = chats.filter((c) => c.isFriend).length;
+        return send(res, 200, {
+          ok: true,
+          total: chats.length,
+          groupCount,
+          friendCount,
+          chats,
+          wechat: wx,
+        });
+      } catch (e) {
+        return send(res, 400, {
+          ok: false,
+          error: `读取微信聊天记录失败：${String(e.message || e).slice(0, 180)}`,
+          wechat: wx,
+        });
+      }
     }
 
     if (p === '/api/groups' && req.method === 'POST') {
@@ -385,16 +667,26 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/fun/run' && req.method === 'POST') {
+      store.reloadSettings();
       if (state.funRunning) return send(res, 409, { ok: false, error: '正在整理娱乐群，请稍候' });
+      const b = backendStatus(store.settings);
+      if (!b.ready) {
+        return send(res, 400, { ok: false, needsSetup: true, error: `请先配置 ${b.providerName} 的 API Key 或选择账号登录` });
+      }
       runFun();
-      return send(res, 200, { ok: true });
+      return send(res, 200, { ok: true, providerName: b.providerName });
     }
 
     if (p === '/api/run' && req.method === 'POST') {
+      store.reloadSettings();
       if (state.running) return send(res, 409, { ok: false, error: '正在整理中，请稍候' });
+      const b = backendStatus(store.settings);
+      if (!b.ready) {
+        return send(res, 400, { ok: false, needsSetup: true, error: `请先配置 ${b.providerName} 的 API Key 或选择账号登录` });
+      }
       state.error = null;
       runOrganize({ trigger: 'manual' });     // 后台跑，前端轮询状态
-      return send(res, 200, { ok: true });
+      return send(res, 200, { ok: true, providerName: b.providerName });
     }
 
     if (p === '/api/agenda' && req.method === 'POST') {
@@ -431,10 +723,11 @@ const server = http.createServer(async (req, res) => {
           return send(res, 200, { ok: true, added: 0, updated: 0, items: 0, note: '这段内容里没有要做的具体事项' });
         }
         const { added, updated } = store.upsertNotices(todos, { runId: 'paste-' + cryptoId() });
+        const b = backendStatus(store.settings);
         finishRun({
           runId: 'paste-' + cryptoId(), trigger: 'paste', type: 'manual',
           totalMsgs: 1, items: todos.length, added, updated,
-          engine: 'workbuddy', groups: 1, durationMs: 0,
+          engine: b.provider, groups: 1, durationMs: 0,
         });
         return send(res, 200, { ok: true, added, updated, items: todos.length });
       } catch (e) {

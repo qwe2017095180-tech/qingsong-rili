@@ -19,7 +19,7 @@ mkdir -p "$OUT/lib" "$OUT/public" "$OUT/data" \
 # ── 应用代码 ──
 cp "$ROOT"/server.mjs "$ROOT"/mcp-server.mjs "$ROOT"/wb-bridge.mjs "$OUT"/
 cp "$ROOT"/start.bat "$ROOT"/start.ps1 "$ROOT"/INSTALL_FOR_AI.md "$OUT"/
-for f in store.mjs wechat.mjs queue.mjs fun-summary.mjs workbuddy-model.mjs model-deepseek.mjs; do
+for f in store.mjs wechat.mjs queue.mjs fun-summary.mjs workbuddy-model.mjs model-openai.mjs providers.mjs bridge.mjs update.mjs; do
   cp "$ROOT/lib/$f" "$OUT/lib/"
 done
 cp "$ROOT"/public/* "$OUT/public/"

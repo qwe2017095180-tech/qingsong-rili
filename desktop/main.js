@@ -28,7 +28,7 @@ const { spawn } = require('node:child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 const SERVER_ENTRY = path.join(ROOT, 'server.mjs');
-const ICON = path.join(__dirname, 'build', 'icon.ico');
+const ICON = path.join(__dirname, 'build', process.platform === 'win32' ? 'icon.ico' : 'icon.png');
 const APP_ID = 'com.qingsong.rili.desktop';
 
 const PORT_START = 7788;
@@ -158,7 +158,7 @@ function buildMenu() {
       submenu: [
         { label: '打开数据目录', click: () => shell.openPath(path.join(ROOT, 'data')) },
         { type: 'separator' },
-        { label: '退出', accelerator: 'Alt+F4', role: 'quit' },
+        { label: '退出', accelerator: process.platform === 'darwin' ? 'Cmd+Q' : 'Alt+F4', role: 'quit' },
       ],
     },
     {

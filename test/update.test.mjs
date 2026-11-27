@@ -127,3 +127,44 @@ test('falls back to mirror remote when direct git fetch fails', async (t) => {
   assert.equal(result.restartRequired, true);
   assert.equal(readFileSync(path.join(install, 'version.json'), 'utf8'), '{"version":"1.3.0"}');
 });
+
+test('falls back to web release redirect when GitHub API returns 403 rate limit', async () => {
+  const seenUrls = [];
+  const updater = createUpdater(tmpdir(), '1.3.1', async (url) => {
+    seenUrls.push(url);
+    if (url.startsWith('https://api.github.com/')) {
+      return new Response(JSON.stringify({ message: 'API rate limit exceeded' }), { status: 403 });
+    }
+    if (url.endsWith('/releases/latest')) {
+      return new Response(null, {
+        status: 302,
+        headers: { location: 'https://github.com/qwe2017095180-tech/qingsong-rili/releases/tag/v1.3.2' },
+      });
+    }
+    if (url.endsWith('/v1.3.2/version.json')) {
+      return Response.json({ version: '1.3.2', notes: '绕过 API 限流检查更新' });
+    }
+    throw new Error(`unexpected url: ${url}`);
+  }, { retryDelayMs: 0, maxAttempts: 1 });
+
+  const res = await updater.check();
+  assert.equal(res.hasUpdate, true);
+  assert.equal(res.latest, '1.3.2');
+  assert.equal(res.tag, 'v1.3.2');
+  assert.equal(res.notes, '绕过 API 限流检查更新');
+  assert.equal(seenUrls.length, 3);
+});
+
+test('web fallback returns no update when repository redirects to /releases without a tag', async () => {
+  const updater = createUpdater(tmpdir(), '1.3.2', async (url) => {
+    if (url.startsWith('https://api.github.com/')) {
+      return new Response(null, { status: 403 });
+    }
+    return new Response(null, {
+      status: 302,
+      headers: { location: 'https://github.com/qwe2017095180-tech/qingsong-rili/releases' },
+    });
+  }, { retryDelayMs: 0, maxAttempts: 1 });
+
+  assert.deepEqual(await updater.check(), { current: '1.3.2', latest: null, hasUpdate: false });
+});

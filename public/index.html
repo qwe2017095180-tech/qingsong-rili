@@ -18,6 +18,7 @@
     <div class="next-run" id="nextRun">—</div>
     <button class="btn primary" id="runBtn">立即整理</button>
     <a class="btn ghost" id="bridgeBtn" href="/bridge.html" title="连接轻松打卡">连接</a>
+    <button class="btn ghost" id="wizardBtn" type="button" title="首次配置向导（本地微信与 AI 接入）">向导</button>
     <button class="btn ghost" id="annBtn" title="使用公告">公告<span class="dot" id="annDot" hidden></span></button>
   </div>
 </header>
@@ -125,16 +126,246 @@
   </div>
 </aside>
 
-<aside class="drawer settings" id="annDrawer" hidden>
+<aside class="drawer settings ann-drawer" id="annDrawer" hidden>
   <div class="drawer-head">
-    <h2>使用公告</h2>
-    <button class="close" id="closeAnn">×</button>
+    <div>
+      <h2>更新与公告</h2>
+      <div class="ann-head-sub" id="annSub">了解新功能与快捷使用技巧</div>
+    </div>
+    <button class="close" id="closeAnn" aria-label="关闭公告">×</button>
   </div>
-  <div class="drawer-body" id="annBody"></div>
+  <div class="ann-filter-bar">
+    <div class="seg" id="annFilterTabs" role="tablist">
+      <button type="button" class="on" data-ann-filter="all">全部</button>
+      <button type="button" data-ann-filter="更新">版本更新</button>
+      <button type="button" data-ann-filter="使用技巧">使用技巧</button>
+    </div>
+  </div>
+  <div class="drawer-body ann-body" id="annBody"></div>
   <div class="s-foot-fixed">
+    <button class="btn ghost" id="annOpenWizard">🧭 配置向导</button>
     <button class="btn primary" id="annOk" style="flex:1">知道了</button>
   </div>
 </aside>
+
+<dialog id="setupDialog" class="setup-dialog wizard-dialog" aria-labelledby="setupTitle">
+  <div class="setup-head">
+    <div>
+      <h2 id="setupTitle">轻松日程 · 首次配置向导</h2>
+      <p class="setup-sub">按步骤完成本地微信读取、AI 渠道接入（默认 DeepSeek）与选群，约 2 分钟即可开始自动整理。</p>
+    </div>
+    <button class="close" id="closeSetup" type="button" aria-label="关闭向导">×</button>
+  </div>
+
+  <nav class="wizard-steps" id="wizardSteps" aria-label="配置步骤">
+    <button type="button" class="wizard-step on" data-step="1">
+      <span class="wizard-step-num" id="stepBadge1">1</span>
+      <span class="wizard-step-text">读取微信</span>
+    </button>
+    <button type="button" class="wizard-step" data-step="2">
+      <span class="wizard-step-num" id="stepBadge2">2</span>
+      <span class="wizard-step-text">接入 AI</span>
+    </button>
+    <button type="button" class="wizard-step" data-step="3">
+      <span class="wizard-step-num" id="stepBadge3">3</span>
+      <span class="wizard-step-text">挑选群聊</span>
+    </button>
+    <button type="button" class="wizard-step" data-step="4">
+      <span class="wizard-step-num" id="stepBadge4">4</span>
+      <span class="wizard-step-text">完成启用</span>
+    </button>
+  </nav>
+
+  <!-- 第 1 步：读取本地微信 -->
+  <section class="wizard-pane" id="wizardStep1">
+    <div class="wizard-card">
+      <div class="wizard-card-head">
+        <div>
+          <div class="wizard-card-title">本机微信读取环境体检</div>
+          <div class="wizard-card-desc">只在本机只读微信数据库，不登录微信、不模拟客户端、不上传原始聊天。</div>
+        </div>
+        <button type="button" class="btn primary" id="testWechatBtn">实测读取微信</button>
+      </div>
+      <div class="diag-list" id="wechatDiagList"></div>
+      <div class="setup-feedback" id="wechatTestFeedback" hidden></div>
+    </div>
+
+    <div class="wizard-card ai-assist-card">
+      <div class="wizard-card-head">
+        <div>
+          <div class="wizard-card-title">🤖 一键让 AI 助手帮你配置本地微信</div>
+          <div class="wizard-card-desc">复制完整配置指令，直接弹到你电脑上的 WorkBuddy、DeepSeek Harness (dsh)、豆包等 Agent 软件，粘贴发送即可让 AI 全自动完成环境检查与配置。</div>
+        </div>
+        <button type="button" class="btn primary" id="copyWechatPromptBtn">📋 一键复制指令</button>
+      </div>
+      <div class="agent-launch-label">点击下方软件：自动复制指令并直接弹出该软件</div>
+      <div class="agent-grid" id="wechatAgentGrid"></div>
+      <div class="setup-feedback" id="agentLaunchFeedback" hidden></div>
+      <details class="prompt-preview">
+        <summary>查看将发送给 AI 助手的完整指令内容</summary>
+        <pre id="wechatPromptPreview"></pre>
+      </details>
+    </div>
+
+    <details class="wizard-card manual-guide-details">
+      <summary class="manual-guide-summary">想自己手动配？展开 macOS / Windows 命令行教程</summary>
+      <div class="wizard-card-head" style="margin-top:12px">
+        <div class="wizard-card-title">手动配置步骤</div>
+        <div class="seg wizard-os-tabs" id="wechatOsTabs">
+          <button type="button" class="on" data-os="mac">macOS</button>
+          <button type="button" data-os="win">Windows</button>
+        </div>
+      </div>
+      <div id="wechatGuideMac" class="guide-steps">
+        <ol class="account-steps">
+          <li>保持电脑版微信（WeChat 4.x）处于<strong>已登录</strong>状态。</li>
+          <li>确认本机已有微信解密读取技能（默认目录 <code>~/.dsh/skills/wechat-decrypt</code>，含 <code>.venv</code> 与密钥文件）。</li>
+          <li>如首次读取报权限错误，在「系统设置 → 隐私与安全性 → 完全磁盘访问权限」中勾选终端或轻松日程，重启后再点上方「实测读取微信」。</li>
+          <li>如刚更新微信或换账号导致新消息读不到，可在终端重新提取一次本机密钥：
+            <div class="cmd-box">
+              <code>cd ~/.dsh/skills/wechat-decrypt &amp;&amp; .venv/bin/python scripts/macos/extract_key.py</code>
+              <button type="button" class="btn ghost cmd-copy" data-copy="cd ~/.dsh/skills/wechat-decrypt && .venv/bin/python scripts/macos/extract_key.py">复制</button>
+            </div>
+          </li>
+        </ol>
+      </div>
+      <div id="wechatGuideWin" class="guide-steps" hidden>
+        <ol class="account-steps">
+          <li>确认已安装 Node.js 18+、Python 3.9+，且 <strong>Windows 版微信 4.x</strong> 已登录。</li>
+          <li>在项目 <code>vendor\wechat-decrypt</code> 目录初始化一次 Python 依赖：
+            <div class="cmd-box">
+              <code>cd vendor\wechat-decrypt &amp;&amp; python -m venv .venv &amp;&amp; .\.venv\Scripts\python.exe -m pip install -r requirements-windows.txt</code>
+              <button type="button" class="btn ghost cmd-copy" data-copy="cd vendor\wechat-decrypt && python -m venv .venv && .\.venv\Scripts\python.exe -m pip install -r requirements-windows.txt">复制</button>
+            </div>
+          </li>
+          <li>用<strong>管理员权限</strong>打开 PowerShell 提取一次数据库密钥（会重启一次微信）：
+            <div class="cmd-box">
+              <code>.\.venv\Scripts\python.exe scripts\windows\extract_raw_key.py 30</code>
+              <button type="button" class="btn ghost cmd-copy" data-copy=".\.venv\Scripts\python.exe scripts\windows\extract_raw_key.py 30">复制</button>
+            </div>
+          </li>
+          <li>执行全量解密到明文库（日后同步新消息时再次运行即可）：
+            <div class="cmd-box">
+              <code>.\.venv\Scripts\python.exe scripts\windows\decrypt_all.py</code>
+              <button type="button" class="btn ghost cmd-copy" data-copy=".\.venv\Scripts\python.exe scripts\windows\decrypt_all.py">复制</button>
+            </div>
+          </li>
+        </ol>
+      </div>
+    </details>
+  </section>
+
+  <!-- 第 2 步：接入 AI 模型 -->
+  <section class="wizard-pane" id="wizardStep2" hidden>
+    <div class="seg setup-tabs" id="setupModeTabs" role="tablist">
+      <button type="button" class="on" data-setup-mode="apiKey">🔑 填入 API Key（默认 DeepSeek）</button>
+      <button type="button" data-setup-mode="account">👤 账号登录（WorkBuddy）</button>
+    </div>
+    <div id="setupApiPane" class="setup-pane">
+      <div class="setup-label">选择模型渠道商</div>
+      <div class="provider-grid" id="setupProviderGrid"></div>
+      <div class="provider-tip" id="setupProviderTip"></div>
+      <div class="deepseek-guide" id="setupDeepseekGuide">
+        <div class="deepseek-guide-title">DeepSeek 账号快速接入（2 步完成）</div>
+        <div class="deepseek-guide-desc">DeepSeek 官方 API 使用开放平台 Key 鉴权，在网页内同样支持微信扫码登录，创建一次 Key 粘贴回来即可长期使用：</div>
+        <div class="deepseek-guide-actions">
+          <a id="setupDeepseekLoginBtn" class="btn ghost mirror-chip" href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener noreferrer">① 登录 DeepSeek 开放平台创建 Key ↗</a>
+        </div>
+      </div>
+      <label class="setup-field">
+        <span class="setup-field-row">
+          <span>API Key</span>
+          <a id="setupConsoleLink" class="setup-link" target="_blank" rel="noopener noreferrer" hidden>获取 API Key ↗</a>
+        </span>
+        <div class="key-input-wrap">
+          <input class="s-input" id="setupApiKey" type="password" autocomplete="off" placeholder="sk-..." />
+          <button type="button" class="btn ghost key-eye" id="setupKeyPaste">粘贴</button>
+          <button type="button" class="btn ghost key-eye" id="setupKeyToggle">显示</button>
+        </div>
+      </label>
+      <label class="setup-field">
+        <span>模型名称</span>
+        <input class="s-input" id="setupApiModel" placeholder="例如 deepseek-chat" />
+        <div class="mirror-chips" id="setupModelChips"></div>
+      </label>
+      <label class="setup-field" id="setupBaseUrlWrap">
+        <span>接口地址（Base URL）</span>
+        <input class="s-input" id="setupApiBaseUrl" placeholder="https://api.deepseek.com" />
+      </label>
+      <p class="setup-privacy">🔒 API Key 仅保存在本机 <code>data/settings.json</code>，不会上传到任何第三方服务器。</p>
+    </div>
+    <div id="setupAccountPane" class="setup-pane" hidden>
+      <div class="account-box">
+        <div class="account-status" id="setupWorkbuddyStatus">正在检测本机 WorkBuddy 命令行…</div>
+        <ol class="account-steps">
+          <li>点击下方按钮打开本机登录终端。</li>
+          <li>在终端中输入 <code>/login</code> 并回车，按提示在浏览器完成账号授权。</li>
+          <li>授权完成后回到这里，点击「测试连接」即可继续。</li>
+        </ol>
+        <div class="account-actions">
+          <button type="button" class="btn primary" id="launchWorkbuddyLogin">打开账号登录终端</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 第 3 步：挑选要整理的群 -->
+  <section class="wizard-pane" id="wizardStep3" hidden>
+    <div class="wizard-card">
+      <div class="seg" id="wizardGroupMode">
+        <button type="button" class="on" data-gmode="notice" id="wizardNoticeTab">📚 通知群 (0)</button>
+        <button type="button" data-gmode="fun" id="wizardFunTab">🎮 娱乐群 (0)</button>
+      </div>
+      <div class="wizard-card-desc" id="wizardGroupHint" style="margin-top:8px">勾选班群、学院通知群、作业群等，AI 会自动提取截止时间和待办。</div>
+      <input class="s-input grp-search" id="wizardGrpSearch" placeholder="搜索群名…" style="margin-top:8px" />
+      <div class="grp-list wizard-grp-list" id="wizardGrpList">
+        <div class="grp-empty">正在读取微信群列表…</div>
+      </div>
+    </div>
+    <div class="wizard-card wizard-inline-grid">
+      <label class="setup-field">
+        <span>⏰ 每天自动整理时间</span>
+        <input class="s-input" id="wizardAutoTime" type="time" value="20:00" />
+      </label>
+      <label class="setup-field">
+        <span>📅 学期第一周周一（可选）</span>
+        <input class="s-input" id="wizardTermStart" type="date" />
+      </label>
+    </div>
+  </section>
+
+  <!-- 第 4 步：完成启用 -->
+  <section class="wizard-pane" id="wizardStep4" hidden>
+    <div class="wizard-card">
+      <div class="wizard-card-title" style="margin-bottom:10px">配置总览</div>
+      <div class="summary-checklist" id="wizardSummaryList"></div>
+    </div>
+    <div class="wizard-card">
+      <div class="wizard-card-head">
+        <div>
+          <div class="wizard-card-title">📱 可选：连接手机「轻松打卡」</div>
+          <div class="wizard-card-desc" id="wizardBridgeDesc">开启局域网配对后，电脑整理出的日程会自动同步到手机「今日日程」。</div>
+        </div>
+        <a class="btn ghost" href="/bridge.html" target="_blank" rel="noopener noreferrer">前往配对 ↗</a>
+      </div>
+    </div>
+  </section>
+
+  <div class="setup-feedback" id="setupFeedback" hidden role="status" aria-live="polite"></div>
+
+  <div class="wizard-footer">
+    <div class="wizard-footer-left">
+      <button class="btn ghost" id="skipSetupBtn" type="button">稍后再说</button>
+      <button class="btn ghost" id="wizardPrevBtn" type="button" hidden>← 上一步</button>
+    </div>
+    <div class="wizard-footer-right">
+      <button class="btn ghost" id="testSetupBtn" type="button" hidden>测试连接</button>
+      <button class="btn primary" id="wizardNextBtn" type="button">下一步 →</button>
+      <button class="btn ghost" id="saveOnlyBtn" type="button" hidden>仅保存进入首页</button>
+      <button class="btn primary" id="saveSetupBtn" type="button" hidden>完成并立即整理</button>
+    </div>
+  </div>
+</dialog>
 
 <dialog id="updateDialog" class="update-dialog" aria-labelledby="updateTitle">
   <h2 id="updateTitle">应用更新</h2>
@@ -146,8 +377,10 @@
     <a class="btn primary" id="downloadUpdate" target="_blank" rel="noopener noreferrer" hidden>前往下载</a>
   </div>
 </dialog>
+<script src="/provider-icons.js"></script>
 <script src="/app.js"></script>
 <script src="/add.js"></script>
+<script src="/setup.js"></script>
 <script src="/update.js"></script>
 </body>
 </html>

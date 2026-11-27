@@ -30,7 +30,9 @@ const app = {
   funTab: 'all',
   selectedId: null,
   groupCache: null,
+  groupLoading: false,
   groupQuery: '',
+  disconnected: false,
   draft: null,
   pollTimer: null,
   tickTimer: null,
@@ -225,18 +227,22 @@ function visibleFun() {
 
 function funCardHtml(n) {
   const hi = (n.highlights || []).slice(0, 3);
+  const meetups = (n.meetups || []).slice(0, 2);
   const when = n.updatedAt
     ? (() => { const d = new Date(n.updatedAt); return `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`; })()
     : '';
+  const vibe = n.vibe || '群聊';
   return `<article class="card fun group-card" data-funid="${n.id}" style="animation-delay:${Math.random() * 0.08}s">
     <div class="card-top">
-      <span class="badge fun-badge">👥 群聊</span>
+      <span class="badge fun-vibe">💬 ${esc(vibe)}</span>
       <span class="src">${n.messageCount ? `${n.messageCount} 条消息` : '暂无新消息'}</span>
     </div>
     <h3 class="card-title">${esc(n.group)}</h3>
+    ${n.hotspot ? `<div class="fun-hotspot">🔥 ${esc(n.hotspot)}</div>` : ''}
     <p class="summary">${esc(n.summary || '')}</p>
+    ${meetups.length ? `<div class="fun-meetup">📅 ${meetups.map((m) => esc(m)).join(' · ')}</div>` : ''}
     ${hi.length ? `<ul class="fun-hi">${hi.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
-    <div class="card-foot"><span class="deadline none">🕒 更新于 ${when}</span></div>
+    <div class="card-foot"><span class="deadline none">🕒 更新于 ${when}${n.engine && n.engine !== 'none' ? ` · ${esc(n.engine)}` : ''}</span></div>
   </article>`;
 }
 
@@ -244,12 +250,7 @@ function renderFunEmpty() {
   const empty = $('empty');
   const list = funItems();
   const groups = app.data?.settings?.funGroups || [];
-  if (app.tab === 'today') {
-    empty.hidden = !gridEmpty;
-    $('emptyTitle').textContent = '这一天还没有日程';
-    $('emptyText').textContent = '可以添加一条日程，或在「全部」查看整理出的通知。';
-    $('emptyAction').textContent = '添加日程';
-  } else if (!groups.length && gridEmpty) {
+  if (!groups.length) {
     empty.hidden = false;
     $('emptyTitle').textContent = '先选几个娱乐群';
     $('emptyText').innerHTML = '游戏群、动漫群、桌游群、吃喝群…<br/>选好了我就帮你看大家在聊什么、有什么局。';
@@ -259,7 +260,7 @@ function renderFunEmpty() {
   if (!list.length) {
     empty.hidden = false;
     $('emptyTitle').textContent = '还没有群总结';
-    $('emptyText').innerHTML = `已经选好 ${groups.length} 个娱乐群，点「立即整理」，<br/>我会给每个群写一份这段时间都在聊什么的总结。`;
+    $('emptyText').innerHTML = `已经选好 ${groups.length} 个娱乐群，点「立即整理」，<br/>我会用 AI 给每个群写一份像真人群友复盘一样的省流总结。`;
     $('emptyAction').textContent = '立即整理';
     return;
   }
@@ -267,12 +268,32 @@ function renderFunEmpty() {
 }
 
 // ── 数据 ──────────────────────────────────────────────────
+function isNetworkFetchError(err) {
+  const msg = String((err && err.message) || err || '');
+  return err?.name === 'TypeError' || /failed to fetch|load failed|networkerror|network request failed/i.test(msg);
+}
+
 async function api(path, opts = {}) {
-  const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...opts,
-  });
-  return res.json();
+  let res;
+  try {
+    res = await fetch(path, {
+      headers: { 'Content-Type': 'application/json' },
+      ...opts,
+    });
+  } catch (err) {
+    if (isNetworkFetchError(err)) {
+      const netErr = new Error('连不上本地服务，请确认「轻松日程」启动窗口还在运行');
+      netErr.isNetwork = true;
+      throw netErr;
+    }
+    throw err;
+  }
+  const text = await res.text();
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`服务返回异常（HTTP ${res.status}）`);
+  }
 }
 
 let prevRunning = false;
@@ -309,19 +330,32 @@ function afterRun(data) {
 async function load({ quiet = false } = {}) {
   try {
     const data = await api('/api/state');
+    const wasDisconnected = app.disconnected;
+    app.disconnected = false;
     app.data = data;
     render();
     afterRun(data);
-    schedulePoll();
+    if (typeof maybeOpenOnboarding === 'function') maybeOpenOnboarding();
+    if (wasDisconnected) {
+      toast('已重新连上本地服务');
+      if (!$('settingsDrawer').hidden && app.groupError) retryGroups();
+    }
   } catch (e) {
-    if (!quiet) toast('连不上本地服务，请确认启动窗口还开着');
+    const firstDisconnect = !app.disconnected;
+    app.disconnected = true;
+    if (!quiet || firstDisconnect) {
+      toast(e?.isNetwork ? '连不上本地服务，请确认启动窗口还开着' : (e?.message || '读取状态失败'));
+    }
+  } finally {
+    schedulePoll();
   }
 }
 
 function schedulePoll() {
   clearTimeout(app.pollTimer);
-  const running = app.data?.state?.running;
-  app.pollTimer = setTimeout(() => load({ quiet: true }), running ? 1800 : 30000);
+  const running = Boolean(app.data?.state?.running || app.data?.fun?.running);
+  const ms = app.disconnected ? 5000 : (running ? 1800 : 30000);
+  app.pollTimer = setTimeout(() => load({ quiet: true }), ms);
 }
 
 // ── 渲染 ──────────────────────────────────────────────────
@@ -406,12 +440,15 @@ function render() {
   }
   if (app.selectedId) renderDetail();
 
-  if (state.error && !state.running) {
-    if (!app._lastErr || app._lastErr !== state.error) {
-      app._lastErr = state.error;
-      toast(state.error, 4200);
+  const activeErr = app.mode === 'fun'
+    ? (app.data?.fun?.running ? null : app.data?.fun?.error)
+    : (state.running ? null : state.error);
+  if (activeErr) {
+    if (!app._lastErr || app._lastErr !== activeErr) {
+      app._lastErr = activeErr;
+      toast(activeErr, 4200);
     }
-  } else if (!state.error) {
+  } else {
     app._lastErr = null;
   }
 }
@@ -428,7 +465,6 @@ function updateRunBar(state) {
   }
   bar.hidden = false;
 
-  // 点按钮后应用真的在调 WorkBuddy 模型，进度条按阶段推进，不再是排队等待
   bar.classList.remove('queued');
   const pulse = bar.querySelector('.pulse');
   const track = bar.querySelector('.runbar-track');
@@ -438,7 +474,7 @@ function updateRunBar(state) {
   let pct = 12;
   const m = String(phase || '').match(/(\d+)\s*\/\s*(\d+)/);
   if (m) pct = 8 + (+m[1] / +m[2]) * 66;
-  else if (/WorkBuddy|分类整理|整理娱乐|正在整理/.test(phase)) pct = 78;
+  else if (/正在由|总结|WorkBuddy|分类整理|整理娱乐|正在整理/.test(phase)) pct = 78;
   else if (/保存/.test(phase)) pct = 94;
   $('runFill').style.width = pct + '%';
 }
@@ -642,12 +678,14 @@ function renderFunDetail(n) {
   const when = n.updatedAt
     ? (() => { const d = new Date(n.updatedAt); return `${d.getMonth() + 1}月${d.getDate()}日 ${pad(d.getHours())}:${pad(d.getMinutes())}`; })()
     : '';
+  const topics = Array.isArray(n.topics) ? n.topics : [];
+  const meetups = Array.isArray(n.meetups) ? n.meetups : [];
   $('drawer').innerHTML = `
     <div class="drawer-head">
       <div>
         <div class="d-meta">
-          <span class="badge fun-badge">👥 群聊总结</span>
-          <span class="d-src">${n.messageCount ? `${n.messageCount} 条消息 · ` : ''}${when}</span>
+          <span class="badge fun-vibe">💬 ${esc(n.vibe || '群聊总结')}</span>
+          <span class="d-src">${n.messageCount ? `${n.messageCount} 条消息 · ` : ''}${when}${n.engine && n.engine !== 'none' ? ` · ${esc(n.engine)}` : ''}</span>
         </div>
         <h2 class="d-title">${esc(n.group)}</h2>
       </div>
@@ -655,15 +693,28 @@ function renderFunDetail(n) {
     </div>
     <div class="drawer-body">
       <div class="d-section">
-        <div class="d-label">这段时间</div>
+        <div class="d-label">省流总述</div>
         <div class="d-text">${esc(n.summary || '（没有总结）')}</div>
       </div>
       ${n.hotspot ? `<div class="d-section">
         <div class="d-label">最热话题</div>
         <div class="d-action"><span class="ico">🔥</span><span>${esc(n.hotspot)}</span></div>
       </div>` : ''}
+      ${meetups.length ? `<div class="d-section">
+        <div class="d-label">约局与活动</div>
+        ${meetups.map((m) => `<div class="fun-meetup">📅 ${esc(m)}</div>`).join('')}
+      </div>` : ''}
+      ${topics.length ? `<div class="d-section">
+        <div class="d-label">聊了什么</div>
+        <div class="fun-topics">
+          ${topics.map((t) => `<div class="fun-topic-card">
+            <div class="fun-topic-title">${esc(t.title)}</div>
+            <div class="fun-topic-detail">${esc(t.detail)}</div>
+          </div>`).join('')}
+        </div>
+      </div>` : ''}
       ${(n.highlights || []).length ? `<div class="d-section">
-        <div class="d-label">要点</div>
+        <div class="d-label">看点与结论</div>
         <ul class="fun-hi big">${n.highlights.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
       </div>` : ''}
       <div class="d-buttons">
@@ -797,6 +848,7 @@ function openSettings() {
     days: s.days || 'daily',
     groups: (s.groups || []).map((g) => ({ ...g })),
     funGroups: (s.funGroups || []).map((g) => ({ ...g })),
+    updateMirror: s.updateMirror || '',
   };
   $('mask').hidden = false;
   $('settingsDrawer').hidden = false;
@@ -812,6 +864,8 @@ function closeSettings() {
 
 async function loadGroups() {
   if (app.groupCache && app.groupCache.length) return renderSettings();
+  if (app.groupLoading) return;
+  app.groupLoading = true;
   $('settingsBody').querySelector('#grpList')?.classList.add('loading');
   app.groupError = null;
   try {
@@ -820,16 +874,27 @@ async function loadGroups() {
     if (res.ok === false) app.groupError = res.error || '读取失败';
   } catch (err) {
     app.groupCache = [];
-    app.groupError = String((err && err.message) || err || '读取失败').slice(0, 200);
+    app.groupError = err?.isNetwork
+      ? '连不上本地服务，请确认「轻松日程」启动窗口还在运行'
+      : String((err && err.message) || err || '读取失败').slice(0, 200);
+  } finally {
+    app.groupLoading = false;
   }
   renderSettings();
 }
 
 // 供设置面板里的「重试」按钮调用
-function retryGroups() {
+async function retryGroups() {
   app.groupCache = null;
   app.groupError = null;
-  loadGroups();
+  renderSettings();
+  if (app.disconnected || !app.data) await load({ quiet: true });
+  return loadGroups();
+}
+
+function groupEmptyHtml() {
+  if (!app.groupError) return '<div class="grp-empty">正在读取微信群列表…</div>';
+  return `<div class="grp-empty">读取失败：${esc(app.groupError)}<br/><button class="btn ghost" onclick="retryGroups()" style="margin-top:10px;padding:6px 14px">重试</button></div>`;
 }
 
 function renderSettings() {
@@ -843,6 +908,20 @@ function renderSettings() {
   const filtered = groups.filter((g) => !q || g.display.toLowerCase().includes(q) || (g.isGroup ? '群' : '人').includes(q));
 
   $('settingsBody').innerHTML = `
+    <div class="s-block wizard-banner-block">
+      <div class="wizard-banner">
+        <div>
+          <div class="s-title" style="margin-bottom:4px">🧭 首次配置向导</div>
+          <div class="s-desc" style="margin-bottom:0">
+            本地微信 ${app.data.env?.wechatReady ? '<span class="ok-dot">● 已就绪</span>' : '<span class="warn-dot">● 待配置</span>'} ·
+            AI ${app.data.env?.ready ? `<span class="ok-dot">● ${esc(app.data.env?.providerName || 'DeepSeek')}</span>` : '<span class="warn-dot">● 待配置</span>'} ·
+            群聊 ${(d.groups.length + d.funGroups.length) ? `<span class="ok-dot">● 已选 ${d.groups.length + d.funGroups.length} 个</span>` : '<span class="warn-dot">● 未选</span>'}
+          </div>
+        </div>
+        <button type="button" class="btn primary" id="openWizardFromSettings">打开向导</button>
+      </div>
+    </div>
+
     <div class="s-block">
       <div class="s-title">⏰ 什么时候自动整理</div>
       <div class="s-desc">到点我会去读你选的群，把新通知整理好。可以设多个时间。</div>
@@ -863,9 +942,7 @@ function renderSettings() {
       <input class="s-input grp-search" id="grpSearch" placeholder="搜索群名…" value="${esc(app.groupQuery)}" />
       <div class="grp-list" id="grpList">
         ${groups.length === 0
-          ? `<div class="grp-empty">${app.groupError
-              ? `读取失败：${esc(app.groupError)}<br/><button class="btn ghost" onclick="retryGroups()" style="margin-top:10px;padding:6px 14px">重试</button>`
-              : '正在读取微信群列表…'}</div>`
+          ? groupEmptyHtml()
           : filtered.length === 0
             ? `<div class="grp-empty">没有匹配的群</div>`
             : filtered.map((g) => `<label class="grp-row">
@@ -883,7 +960,7 @@ function renderSettings() {
       <input class="s-input grp-search" id="funSearch" placeholder="搜索娱乐群…" />
       <div class="grp-list" id="funList">
         ${groups.length === 0
-          ? `<div class="grp-empty">${app.groupError ? `读取失败：${esc(app.groupError)}` : '正在读取微信群列表…'}</div>`
+          ? groupEmptyHtml()
           : (() => {
               const fq = (app.funQuery || '').toLowerCase();
               const fh = new Map(d.funGroups.map((g) => [g.wxid, g]));
@@ -922,17 +999,44 @@ function renderSettings() {
     </div>
 
     <div class="s-block">
-      <div class="s-title">🤖 谁来整理</div>
-      <div class="s-desc">点「立即整理」或到点自动整理时，应用会直接调用模型当场完成分类、总结和截止判断，结果立刻写回。没有本地规则兜底，也不调用 codex / ds。</div>
-      <select class="s-select" id="organizeBackend" style="width:100%;margin-top:8px">
-        ${[['auto','自动（优先 WorkBuddy，其次 AI 接口）'],['workbuddy','WorkBuddy 命令行'],['openai','AI 接口（OpenAI 兼容）'],['queue','只写请求，交给外部 AI 接手']]
-          .map(([v,label]) => `<option value="${v}" ${String(app.data.settings.organizeBackend||'auto') === v ? 'selected' : ''}>${label}</option>`).join('')}
-      </select>
-      <div class="s-desc" style="margin-top:8px">当前后端：<strong>${esc(app.data.env?.backend || '未知')}</strong>${app.data.env?.workbuddyCli ? ' · 已找到 WorkBuddy 命令行' : ''}${app.data.env?.apiConfigured ? ' · 已配置 AI 接口' : ''}</div>
-      <input class="s-input" id="apiBaseUrl" placeholder="Base URL，例如 https://api.deepseek.com" value="${esc(app.data.settings.apiBaseUrl || app.data.settings.deepseekBaseUrl || 'https://api.deepseek.com')}" style="width:100%;margin-top:8px" />
-      <input class="s-input" id="apiKey" type="password" placeholder="API Key（只存本机 data/settings.json，留空则不启用）" value="${esc(app.data.settings.apiKey || app.data.settings.deepseekApiKey || '')}" style="width:100%;margin-top:8px" />
-      <input class="s-input" id="apiModel" placeholder="模型名，例如 deepseek-chat" value="${esc(app.data.settings.apiModel || app.data.settings.deepseekModel || 'deepseek-chat')}" style="width:100%;margin-top:8px" />
-      <div class="dl-hint" style="margin-top:8px">DeepSeek 填 https://api.deepseek.com；OpenAI 填 https://api.openai.com/v1；其他兼容服务填到 /v1 为止。用 WorkBuddy 命令行需先完成一次 /login；用 AI 接口会产生接口费用。</div>
+      <div class="s-title">🤖 AI 整理渠道商</div>
+      <div class="s-desc">默认使用 <strong>DeepSeek</strong>，同时支持多家国内/国际模型接口及 WorkBuddy 账号登录，通知整理与娱乐群总结都会使用当前所选渠道。</div>
+      <div class="ai-status-row">
+        <span class="ai-status-name">${providerIconHtml(app.data.env?.provider || 'deepseek', 20)}<span>当前渠道：<strong>${esc(app.data.env?.providerFullName || 'DeepSeek')}</strong> ${app.data.env?.ready ? '<span class="ok-dot">● 已就绪</span>' : '<span class="warn-dot">● 待配置</span>'}</span></span>
+        <button type="button" class="btn ghost mirror-chip" id="openSetupGuideBtn">配置引导</button>
+      </div>
+      <input type="hidden" id="aiProvider" value="${esc(app.data.env?.provider || 'deepseek')}" />
+      <div class="provider-grid settings-provider-grid" id="settingsProviderGrid">
+        ${(app.data.env?.providers || []).map((p) => `
+          <button type="button" class="provider-pill ${(app.data.env?.provider || 'deepseek') === p.id ? 'on' : ''}" data-settings-provider="${esc(p.id)}">
+            <span class="provider-pill-top">
+              ${providerIconHtml(p.id, 20)}
+              <span class="provider-pill-name">${esc(p.shortName)}</span>
+            </span>
+            ${p.badge ? `<span class="provider-pill-badge">${esc(p.badge)}</span>` : ''}
+          </button>
+        `).join('')}
+      </div>
+      <div id="settingsApiFields">
+        <div class="provider-tip" id="settingsProviderTip" style="margin-top:8px"></div>
+        <div style="display:flex;justify-content:flex-end;margin-top:6px">
+          <a id="settingsConsoleLink" class="setup-link" target="_blank" rel="noopener noreferrer" hidden>获取 API Key ↗</a>
+        </div>
+        <input class="s-input" id="apiKey" type="password" placeholder="API Key（只存本机 data/settings.json）" value="" style="width:100%;margin-top:6px" />
+        <input class="s-input" id="apiModel" placeholder="模型名，例如 deepseek-chat" value="" style="width:100%;margin-top:8px" />
+        <div class="mirror-chips" id="settingsModelChips"></div>
+        <input class="s-input" id="apiBaseUrl" placeholder="Base URL，例如 https://api.deepseek.com" value="" style="width:100%;margin-top:8px" />
+      </div>
+      <div id="settingsWorkbuddyFields" hidden style="margin-top:8px">
+        <div class="provider-tip">${app.data.env?.workbuddyCli ? `已检测到本机 WorkBuddy 命令行（${esc(app.data.env.workbuddyCli)}），点下方按钮打开终端输入 /login 完成授权。` : '本机未检测到 WorkBuddy 命令行，建议切换 DeepSeek 等 API Key 渠道。'}</div>
+        <div class="ai-action-row">
+          <button type="button" class="btn ghost" id="settingsWorkbuddyLogin" ${app.data.env?.workbuddyCli ? '' : 'disabled'}>打开账号登录终端</button>
+        </div>
+      </div>
+      <div class="ai-action-row">
+        <button type="button" class="btn ghost" id="testAiBtn">测试连接</button>
+      </div>
+      <div class="setup-feedback" id="settingsAiFeedback" hidden></div>
       <label class="switch" hidden><input type="checkbox" id="aiToggle" /></label>
     </div>
 
@@ -1057,6 +1161,95 @@ function bindSettings() {
     const cnt = document.querySelector('.s-title span');
     if (cnt) cnt.textContent = `已选 ${d.groups.length} 个`;
   });
+  const providerSel = $('aiProvider');
+  const syncSettingsProviderUi = (pid) => {
+    const meta = typeof getProviderMeta === 'function' ? getProviderMeta(pid) : null;
+    const isAccount = meta?.authType === 'account' || pid === 'workbuddy';
+    $('settingsApiFields').hidden = isAccount;
+    $('settingsWorkbuddyFields').hidden = !isAccount;
+    if (!isAccount && meta) {
+      const saved = typeof savedProfileFor === 'function' ? savedProfileFor(pid) : {};
+      $('settingsProviderTip').textContent = meta.help || '';
+      const link = $('settingsConsoleLink');
+      if (meta.consoleUrl) {
+        link.href = meta.consoleUrl;
+        link.textContent = `${meta.consoleLabel || '获取 API Key'} ↗`;
+        link.hidden = false;
+      } else {
+        link.hidden = true;
+      }
+      $('apiKey').value = saved.apiKey || '';
+      $('apiKey').placeholder = meta.keyPlaceholder || '输入 API Key';
+      $('apiModel').value = saved.model || meta.defaultModel || '';
+      $('apiModel').placeholder = meta.defaultModel ? `默认：${meta.defaultModel}` : '输入模型名称';
+      $('apiBaseUrl').value = saved.baseUrl || meta.baseUrl || '';
+      $('apiBaseUrl').placeholder = meta.baseUrl || '例如 http://127.0.0.1:11434/v1';
+      $('settingsModelChips').innerHTML = (meta.models || []).map((m) =>
+        `<button type="button" class="btn ghost mirror-chip" data-settings-model="${esc(m)}">${esc(m)}</button>`
+      ).join('');
+    }
+  };
+  if (providerSel) {
+    syncSettingsProviderUi(providerSel.value);
+    $('settingsProviderGrid')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-settings-provider]');
+      if (!btn) return;
+      const pid = btn.dataset.settingsProvider;
+      providerSel.value = pid;
+      for (const b of $('settingsProviderGrid').querySelectorAll('[data-settings-provider]')) {
+        b.classList.toggle('on', b.dataset.settingsProvider === pid);
+      }
+      syncSettingsProviderUi(pid);
+      const fb = $('settingsAiFeedback');
+      if (fb) fb.hidden = true;
+    });
+  }
+  $('settingsModelChips')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-settings-model]');
+    if (btn) $('apiModel').value = btn.dataset.settingsModel;
+  });
+  $('openWizardFromSettings')?.addEventListener('click', () => {
+    closeSettings();
+    if (typeof openSetupDialog === 'function') openSetupDialog({ step: 1 });
+  });
+  $('openSetupGuideBtn')?.addEventListener('click', () => {
+    closeSettings();
+    if (typeof openSetupDialog === 'function') openSetupDialog({ step: 2 });
+  });
+  $('settingsWorkbuddyLogin')?.addEventListener('click', async () => {
+    const fb = $('settingsAiFeedback');
+    fb.hidden = false;
+    fb.className = 'setup-feedback info';
+    fb.textContent = '正在打开登录终端…';
+    const res = await api('/api/ai/workbuddy-login', { method: 'POST', body: '{}' });
+    fb.className = `setup-feedback ${res.ok ? 'ok' : 'err'}`;
+    fb.textContent = res.ok ? res.message : (res.error || '启动登录失败');
+  });
+  $('testAiBtn')?.addEventListener('click', async () => {
+    const btn = $('testAiBtn');
+    const fb = $('settingsAiFeedback');
+    btn.disabled = true;
+    fb.hidden = false;
+    fb.className = 'setup-feedback info';
+    fb.textContent = '正在测试模型连接…';
+    try {
+      const pid = $('aiProvider').value;
+      const res = await api('/api/ai/test', {
+        method: 'POST',
+        body: JSON.stringify({
+          aiProvider: pid,
+          apiBaseUrl: $('apiBaseUrl').value.trim(),
+          apiKey: $('apiKey').value.trim(),
+          apiModel: $('apiModel').value.trim(),
+        }),
+      });
+      fb.className = `setup-feedback ${res.ok ? 'ok' : 'err'}`;
+      fb.textContent = res.ok ? `✓ 连接成功（${res.providerName}）` : `连接失败：${res.error || '请检查配置'}`;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
   const checkBtn = $('checkUpdateBtn');
   bindUpdateSettings(checkBtn, $('autoCheckUpdate'));
   const mirrorChips = $('updateMirrorChips');
@@ -1069,6 +1262,7 @@ function bindSettings() {
   }
 
   $('saveSettings').onclick = async () => {
+    const pid = $('aiProvider')?.value || 'deepseek';
     const body = {
       times: d.times,
       days: d.days,
@@ -1078,17 +1272,26 @@ function bindSettings() {
       aiEnabled: $('aiToggle').checked,
       ocrImages: $('ocrToggle').checked,
       termStart: $('termStart').value || null,
-      organizeBackend: $('organizeBackend').value,
+      aiProvider: pid,
+      organizeBackend: pid === 'workbuddy' ? 'workbuddy' : (pid === 'deepseek' ? 'deepseek' : 'openai'),
       apiBaseUrl: $('apiBaseUrl').value.trim(),
       apiKey: $('apiKey').value.trim(),
       apiModel: $('apiModel').value.trim(),
+      onboardingDone: true,
       updateMirror: $('updateMirror')?.value.trim() || '',
     };
     const res = await api('/api/settings', { method: 'POST', body: JSON.stringify(body) });
     if (res.ok) {
+      if (app.data) {
+        if (res.settings) app.data.settings = res.settings;
+        if (res.env) app.data.env = { ...app.data.env, ...res.env };
+        else if (body.apiKey) {
+          app.data.env = { ...app.data.env, ready: true, apiConfigured: true, deepseekConfigured: true };
+        }
+      }
       toast('设置已保存');
       closeSettings();
-      load({ quiet: true });
+      await load({ quiet: true });
     } else {
       toast('保存失败');
     }
@@ -1194,16 +1397,29 @@ $('mask').onclick = () => {
 };
 
 $('runBtn').onclick = async () => {
+  const ready = typeof isAiReady === 'function' ? isAiReady() : Boolean(app.data?.env?.ready || app.data?.env?.apiConfigured);
+  if (!ready) {
+    if (typeof openSetupDialog === 'function') {
+      openSetupDialog({ step: 2, reason: '整理前请先完成第 2 步：填入 DeepSeek 等模型 API Key，或选择账号登录。' });
+    } else {
+      openSettings();
+      toast('请先配置 AI 整理渠道');
+    }
+    return;
+  }
+  const providerName = app.data.env?.providerName || 'DeepSeek';
   if (app.mode === 'fun') {
     if (!(app.data.settings.funGroups || []).length) { openSettings(); toast('先选几个娱乐群'); return; }
     const res = await api('/api/fun/run', { method: 'POST' });
-    if (res.ok) { toast('正在整理娱乐群…'); load({ quiet: true }); }
+    if (res.ok) { toast(`正在由 ${res.providerName || providerName} 总结娱乐群…`); load({ quiet: true }); }
+    else if (res.needsSetup && typeof openSetupDialog === 'function') openSetupDialog({ reason: res.error });
     else toast(res.error || '开始失败');
     return;
   }
   if (!app.data.settings.groups.length) { openSettings(); toast('先选几个要整理的群'); return; }
   const res = await api('/api/run', { method: 'POST' });
-  if (res.ok) { toast('正在由 WorkBuddy 整理…'); load({ quiet: true }); }
+  if (res.ok) { toast(`正在由 ${res.providerName || providerName} 整理…`); load({ quiet: true }); }
+  else if (res.needsSetup && typeof openSetupDialog === 'function') openSetupDialog({ reason: res.error });
   else toast(res.error || '开始失败');
 };
 
@@ -1238,6 +1454,8 @@ document.addEventListener('keydown', (e) => {
 
 // ── 使用公告 ──────────────────────────────────────────────
 const ANN_SEEN_KEY = 'qs_ann_seen';
+let annFilter = 'all';
+let annExpandedId = null;
 
 function cmpVersion(a, b) {
   const pa = String(a || '0').split('.').map((n) => parseInt(n, 10) || 0);
@@ -1302,27 +1520,84 @@ function updateAnnDot() {
 function renderAnnouncements() {
   const body = $('annBody');
   if (!body) return;
-  const items = app.announcements || [];
+  const all = app.announcements || [];
+  const items = annFilter === 'all' ? all : all.filter((a) => a.tag === annFilter);
+  const sub = $('annSub');
+  if (sub) {
+    const ver = app.data?.env?.version;
+    sub.textContent = ver ? `当前版本 v${ver} · 共 ${all.length} 条动态与指南` : `共 ${all.length} 条动态与指南`;
+  }
   if (!items.length) {
-    body.innerHTML = '<div class="grp-empty">暂时没有公告</div>';
+    body.innerHTML = '<div class="grp-empty">该分类下暂时没有公告</div>';
     return;
+  }
+  if (!annExpandedId || !items.some((x) => x.id === annExpandedId)) {
+    annExpandedId = items[0].id;
   }
   const seen = annSeen();
   body.innerHTML = items
-    .map((a) => {
+    .map((a, idx) => {
       const isNew = cmpVersion(a.version, seen) > 0;
-      return `<article class="ann-item">
-        <div class="ann-head">
-          <span class="ann-tag ${a.tag === '更新' ? 'upd' : 'guide'}">${esc(a.tag || '公告')}</span>
-          <span class="ann-title">${esc(a.title || '')}</span>
-          ${isNew ? '<span class="ann-new">新</span>' : ''}
+      const expanded = a.id === annExpandedId;
+      const actions = Array.isArray(a.actions) ? a.actions : [];
+      return `<article class="ann-card ${expanded ? 'open' : ''} ${idx === 0 && annFilter === 'all' ? 'latest' : ''}" data-ann-id="${esc(a.id)}">
+        <button type="button" class="ann-card-toggle" data-ann-toggle="${esc(a.id)}" aria-expanded="${expanded}">
+          <div class="ann-head">
+            <span class="ann-tag ${a.tag === '更新' ? 'upd' : 'guide'}">${esc(a.tag || '公告')}</span>
+            ${a.version ? `<span class="ann-ver">v${esc(a.version)}</span>` : ''}
+            ${isNew ? '<span class="ann-new">NEW</span>' : ''}
+            <span class="ann-date">${esc(a.date || '')}</span>
+          </div>
+          <div class="ann-title-row">
+            <span class="ann-title">${esc(a.title || '')}</span>
+            <span class="ann-chevron" aria-hidden="true">${expanded ? '▴' : '▾'}</span>
+          </div>
+          ${a.summary ? `<p class="ann-summary">${esc(a.summary)}</p>` : ''}
+        </button>
+        <div class="ann-detail" ${expanded ? '' : 'hidden'}>
+          <div class="ann-content">${(a.blocks || []).map(renderBlock).join('')}</div>
+          ${actions.length ? `<div class="ann-actions">${actions.map((act) =>
+            `<button type="button" class="btn ghost mirror-chip" data-ann-act="${esc(act.action)}">${esc(act.label)}</button>`
+          ).join('')}</div>` : ''}
         </div>
-        <div class="ann-meta">v${esc(a.version || '')} · ${esc(a.date || '')}</div>
-        <div class="ann-content">${(a.blocks || []).map(renderBlock).join('')}</div>
       </article>`;
     })
     .join('');
 }
+
+$('annFilterTabs')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-ann-filter]');
+  if (!btn) return;
+  annFilter = btn.dataset.annFilter;
+  for (const b of $('annFilterTabs').querySelectorAll('[data-ann-filter]')) {
+    b.classList.toggle('on', b.dataset.annFilter === annFilter);
+  }
+  annExpandedId = null;
+  renderAnnouncements();
+});
+
+$('annBody')?.addEventListener('click', (e) => {
+  const actBtn = e.target.closest('[data-ann-act]');
+  if (actBtn) {
+    const act = actBtn.dataset.annAct;
+    closeAnnouncements();
+    if (act === 'wizard' && typeof openSetupDialog === 'function') openSetupDialog({ step: 1 });
+    else if (act === 'update' && typeof checkForAppUpdate === 'function') checkForAppUpdate();
+    else if (act === 'bridge') window.location.href = '/bridge.html';
+    return;
+  }
+  const toggleBtn = e.target.closest('[data-ann-toggle]');
+  if (toggleBtn) {
+    const id = toggleBtn.dataset.annToggle;
+    annExpandedId = annExpandedId === id ? null : id;
+    renderAnnouncements();
+  }
+});
+
+$('annOpenWizard')?.addEventListener('click', () => {
+  closeAnnouncements();
+  if (typeof openSetupDialog === 'function') openSetupDialog({ step: 1 });
+});
 
 function openAnnouncements() {
   $('mask').hidden = false;
@@ -1350,11 +1625,14 @@ async function loadAnnouncements() {
   updateAnnDot();
   renderAnnouncements();
 
-  // 有新内容时自动展开一次；每次页面加载只自动弹一次，避免反复打扰
+  // 有新内容时自动展开一次（不与配置向导或更新弹窗抢焦点）
   if (annHasUnseen() && !sessionStorage.getItem('qs_ann_auto')) {
     sessionStorage.setItem('qs_ann_auto', '1');
     setTimeout(() => {
-      if ($('annDrawer').hidden && $('settingsDrawer').hidden && $('drawer').hidden) openAnnouncements();
+      const dialogOpen = $('setupDialog')?.open || $('updateDialog')?.open;
+      if (!dialogOpen && $('annDrawer').hidden && $('settingsDrawer').hidden && $('drawer').hidden) {
+        openAnnouncements();
+      }
     }, 1200);
   }
 }
