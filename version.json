@@ -1,7 +1,7 @@
 {
-  "version": "1.3.6",
+  "version": "1.3.7",
   "releasedAt": "2026-11-27",
-  "notes": "将「更多设置」统一为居中模态弹窗，并在群聊选择器中加入「🔄 刷新群聊」按钮，支持随时重新拉取本地微信群列表而不丢失其他页面未保存的配置。",
+  "notes": "修复微信滚动新建消息分库后新进群聊无法被检测到的问题，改为合并读取 session.db、contact.db、message_fts.db 与消息分库并按最近活跃倒序排列。",
   "repo": "qwe2017095180-tech/qingsong-rili",
   "download": "https://github.com/qwe2017095180-tech/qingsong-rili/releases/latest"
 }

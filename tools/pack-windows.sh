@@ -12,13 +12,14 @@ NODE="${NODE:-$(command -v node || true)}"
 [ -d "$SKILL/scripts/windows" ] || { echo "找不到微信解密技能: $SKILL"; exit 1; }
 
 rm -rf "$OUT"
-mkdir -p "$OUT/lib" "$OUT/public" "$OUT/data" "$OUT/desktop/build" \
+mkdir -p "$OUT/lib" "$OUT/public" "$OUT/data" "$OUT/tools" "$OUT/desktop/build" \
          "$OUT/vendor/wechat-decrypt/scripts/common" \
          "$OUT/vendor/wechat-decrypt/scripts/windows"
 
 # ── 应用代码 ──
 cp "$ROOT"/server.mjs "$ROOT"/mcp-server.mjs "$ROOT"/wb-bridge.mjs "$ROOT"/version.json "$OUT"/
 cp "$ROOT"/start.bat "$ROOT"/start.ps1 "$ROOT"/INSTALL_FOR_AI.md "$OUT"/
+cp "$ROOT/tools/list_sessions.py" "$OUT/tools/"
 for f in store.mjs wechat.mjs queue.mjs fun-summary.mjs workbuddy-model.mjs model-openai.mjs providers.mjs agents.mjs bridge.mjs update.mjs; do
   cp "$ROOT/lib/$f" "$OUT/lib/"
 done
