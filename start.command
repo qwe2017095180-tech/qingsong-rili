@@ -4,7 +4,7 @@ cd "$(dirname "$0")" || exit 1
 ROOT="$(pwd)"
 
 # 1. 优先启动 macOS 独立 App（无需留着终端窗口）
-for APP in "/Applications/轻松日程.app" "$ROOT/dist/轻松日程.app"; do
+for APP in "$ROOT/轻松日程.app" "/Applications/轻松日程.app" "$ROOT/dist/轻松日程.app"; do
   if [ -d "$APP" ]; then
     /usr/bin/open "$APP"
     exit 0

@@ -6,12 +6,18 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP_NAME="轻松日程"
 BUNDLE_ID="com.qingsong.rili.desktop"
 VERSION="$(node -e "console.log(JSON.parse(require('fs').readFileSync('$ROOT/version.json','utf8')).version || '1.0.0')")"
-OUT_APP="$ROOT/dist/${APP_NAME}.app"
+OUT_APP="${OUT_APP:-$ROOT/dist/${APP_NAME}.app}"
+PORTABLE="${PORTABLE:-0}"
+UNIVERSAL="${UNIVERSAL:-$PORTABLE}"
+if [ "$PORTABLE" = "1" ]; then
+  SKIP_INSTALL=1
+fi
 INSTALL_APP="/Applications/${APP_NAME}.app"
 ICON_SRC="$ROOT/desktop/build/icon.png"
 OBJC_SRC="$ROOT/desktop/macos/QingsongApp.m"
 
-echo "正在构建 ${APP_NAME}.app (v${VERSION})..."
+echo "正在构建 ${APP_NAME}.app (v${VERSION}, portable=${PORTABLE}, universal=${UNIVERSAL})..."
+mkdir -p "$(dirname "$OUT_APP")"
 rm -rf "$OUT_APP"
 mkdir -p "$OUT_APP/Contents/MacOS" "$OUT_APP/Contents/Resources"
 
@@ -27,13 +33,21 @@ iconutil -c icns "$TMP_ICONSET" -o "$OUT_APP/Contents/Resources/AppIcon.icns"
 rm -rf "$(dirname "$TMP_ICONSET")"
 
 # 2. 编译 Objective-C 原生桌面壳（WKWebView + Cocoa，零外部依赖）
-clang -O2 -fobjc-arc \
+ARCH_FLAGS=()
+if [ "$UNIVERSAL" = "1" ]; then
+  ARCH_FLAGS=(-arch arm64 -arch x86_64)
+fi
+clang -O2 -fobjc-arc ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"} \
   -framework Cocoa \
   -framework WebKit \
   "$OBJC_SRC" \
   -o "$OUT_APP/Contents/MacOS/QingsongRili"
 
-# 3. 写入 Info.plist（绑定项目目录，允许本机 127.0.0.1 HTTP）
+# 3. 写入 Info.plist（便携版不写入个人路径，允许本机 127.0.0.1 HTTP）
+PROJECT_DIR_XML=""
+if [ "$PORTABLE" != "1" ]; then
+  PROJECT_DIR_XML=$'  <key>QingsongProjectDir</key>\n  <string>'"${ROOT}"$'</string>'
+fi
 cat > "$OUT_APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -63,8 +77,7 @@ cat > "$OUT_APP/Contents/Info.plist" <<EOF
   <string>13.0</string>
   <key>NSHighResolutionCapable</key>
   <true/>
-  <key>QingsongProjectDir</key>
-  <string>${ROOT}</string>
+${PROJECT_DIR_XML}
   <key>NSAppTransportSecurity</key>
   <dict>
     <key>NSAllowsLocalNetworking</key>

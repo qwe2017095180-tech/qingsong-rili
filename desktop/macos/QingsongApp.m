@@ -151,9 +151,8 @@
     }
     NSString *bundleParent = [[[NSBundle mainBundle] bundlePath] stringByDeletingLastPathComponent];
     NSArray<NSString *> *candidates = @[
-        [bundleParent stringByDeletingLastPathComponent],
         bundleParent,
-        [NSHomeDirectory() stringByAppendingPathComponent:@"Desktop/study/wechat-schedule"]
+        [bundleParent stringByDeletingLastPathComponent]
     ];
     for (NSString *dir in candidates) {
         if ([fm fileExistsAtPath:[dir stringByAppendingPathComponent:@"server.mjs"]]) {
